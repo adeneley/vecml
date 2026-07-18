@@ -154,6 +154,7 @@
       <span class="grow"></span>
       <button class="toggle" id="t_log" title="logarithmic y-axis">log y</button>
       <button class="toggle" id="t_ema" title="EMA smoothing">smooth</button>
+      <button class="toggle" id="t_em" title="epoch-mean series">epoch mean</button>
     </div>
     <canvas id="chart"></canvas>
   </div>
@@ -250,6 +251,7 @@
   // --- chart view options (persisted) ---
   let logY = localStorage.getItem("vecml_logy") === "1";
   let ema = localStorage.getItem("vecml_ema") !== "0"; // default on
+  let showEm = localStorage.getItem("vecml_em") === "1"; // default off
   let hoverX = null;
 
   function pad2(n) { return (n < 10 ? "0" : "") + n; }
@@ -376,7 +378,7 @@
     let dlo = Infinity, dhi = -Infinity;
     for (const p of losses) {
       if (p.loss < dlo) dlo = p.loss; if (p.loss > dhi) dhi = p.loss;
-      if (p.epoch_mean != null) {
+      if (showEm && p.epoch_mean != null) {
         if (p.epoch_mean < dlo) dlo = p.epoch_mean;
         if (p.epoch_mean > dhi) dhi = p.epoch_mean;
       }
@@ -457,7 +459,7 @@
     }
 
     // epoch-mean series (the exit-criterion line that must cross the target)
-    const emPts = decimate(losses.filter((p) => p.epoch_mean != null), 2000);
+    const emPts = showEm ? decimate(losses.filter((p) => p.epoch_mean != null), 2000) : [];
     if (emPts.length >= 2) {
       ctx.strokeStyle = "#8250df"; ctx.lineWidth = 2;
       ctx.beginPath();
@@ -563,12 +565,16 @@
   function syncToggles() {
     $("t_log").classList.toggle("on", logY);
     $("t_ema").classList.toggle("on", ema);
+    $("t_em").classList.toggle("on", showEm);
   }
   $("t_log").addEventListener("click", () => {
     logY = !logY; localStorage.setItem("vecml_logy", logY ? "1" : "0"); syncToggles(); draw();
   });
   $("t_ema").addEventListener("click", () => {
     ema = !ema; localStorage.setItem("vecml_ema", ema ? "1" : "0"); syncToggles(); draw();
+  });
+  $("t_em").addEventListener("click", () => {
+    showEm = !showEm; localStorage.setItem("vecml_em", showEm ? "1" : "0"); syncToggles(); draw();
   });
   $("t_clear").addEventListener("click", () => { $("log").innerHTML = ""; });
   syncToggles();

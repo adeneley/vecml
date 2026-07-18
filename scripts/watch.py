@@ -39,6 +39,7 @@ def main() -> None:
         "variant": args.variant,
         "batch_size": args.batch,
         "max_epochs": args.epochs,
+        "ckpt_dir": f"runs/overfit{args.n}",
     }
     app = create_app(defaults)
 
