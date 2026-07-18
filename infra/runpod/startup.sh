@@ -72,6 +72,25 @@ export VECML_SHARDS="${VOL_ROOT}/shards"
 export VECML_CHECKPOINTS="${VOL_ROOT}/checkpoints"
 export VECML_CORPUS_CACHE="${VOL_ROOT}/corpus-cache"
 
+# Safe tarball extraction (Mac-made tarballs carry foreign uids + ._* junk that
+# break GNU tar on the network volume). Jobs should use this instead of raw tar.
+vecml_extract() { tar --no-same-owner --exclude='._*' -xzf "$1" -C "$2"; }
+export -f vecml_extract
+
+# CUDA gate: if this pod has a GPU, refuse to train blind on a CPU fallback
+# (burned us once: cu130 torch vs 12.8 driver ran a 5090 pod on CPU).
+# Set ALLOW_CPU=1 to bypass deliberately for CPU-only jobs on GPU pods.
+if command -v nvidia-smi >/dev/null 2>&1 && [ -z "${ALLOW_CPU:-}" ]; then
+  log "CUDA gate: verifying torch can reach the GPU"
+  if ! uv run python -c 'import torch, sys; sys.exit(0 if torch.cuda.is_available() else 1)'; then
+    uv run python -c 'import torch; print("torch", torch.__version__, "built-cuda", torch.version.cuda, "available", torch.cuda.is_available())' || true
+    nvidia-smi --query-gpu=name,driver_version --format=csv || true
+    echo "FATAL: GPU present but torch.cuda.is_available() is False. Refusing to run on CPU (set ALLOW_CPU=1 to override)." >&2
+    exit 3
+  fi
+  log "CUDA gate: passed"
+fi
+
 if [ -z "${JOB_CMD}" ]; then
   log "no JOB_CMD set. Dependencies are synced; dropping to an idle shell."
   log "Set JOB_CMD in the pod env to run a job automatically."
