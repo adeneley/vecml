@@ -32,6 +32,10 @@ def main() -> None:
     ap.add_argument("--host", default="127.0.0.1",
                     help="bind address (0.0.0.0 for remote pods behind a proxy)")
     ap.add_argument("--no-open", action="store_true", help="do not open a browser")
+    ap.add_argument("--autostart", action="store_true",
+                    help="start the run immediately (remote pods)")
+    ap.add_argument("--readonly", action="store_true",
+                    help="spectator mode: hide run controls, refuse /start & /stop")
     args = ap.parse_args()
 
     defaults = {
@@ -43,7 +47,7 @@ def main() -> None:
         "max_epochs": args.epochs,
         "ckpt_dir": f"runs/overfit{args.n}",
     }
-    app = create_app(defaults)
+    app = create_app(defaults, readonly=args.readonly, autostart=args.autostart)
 
     url = f"http://127.0.0.1:{args.port}"
     print(f"cockpit: {url}  (data={args.data} n={args.n} size={args.size})")

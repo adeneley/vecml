@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="vecml-readonly" content="0">
 <title>vecml cockpit</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%231f6fb2'/%3E%3Cpolyline points='5,24 12,15 18,19 27,7' fill='none' stroke='%23fff' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3Ccircle cx='27' cy='7' r='2.6' fill='%23fff'/%3E%3C/svg%3E">
 <style>
@@ -662,6 +663,10 @@
     es.onmessage = (e) => { try { onEvent(JSON.parse(e.data)); } catch (_) {} };
     es.onerror = () => { log("[sse] disconnected, retrying...", "dim"); };
   }
+
+  // Read-only (spectator) mode: no run controls at all.
+  const READONLY = (document.querySelector('meta[name="vecml-readonly"]') || {}).content === "1";
+  if (READONLY) runBtn.style.display = "none";
 
   runBtn.addEventListener("click", async () => {
     runBtn.disabled = true;

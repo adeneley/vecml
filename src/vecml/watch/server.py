@@ -24,16 +24,35 @@ STATIC = Path(__file__).parent / "static"
 
 
 class EventBus:
-    """Thread-safe fan-out of JSON events with a bounded replay history."""
+    """Thread-safe fan-out of JSON events with typed replay retention.
 
-    def __init__(self, history: int = 800):
+    Late joiners must be able to reconstruct the whole run, so retention is
+    by event type rather than a single rolling window:
+      - status / error / epoch-end metrics: pinned for the run's lifetime
+        (bounded by epoch count, tiny)
+      - step metrics: large rolling window (small dicts, cheap)
+      - samples: only the latest (they carry big base64 PNGs)
+    """
+
+    def __init__(self, detail: int = 50_000, pinned_cap: int = 5_000):
         self._lock = threading.Lock()
-        self._history: deque[dict] = deque(maxlen=history)
+        self._seq = 0
+        self._pinned: deque[dict] = deque(maxlen=pinned_cap)
+        self._detail: deque[dict] = deque(maxlen=detail)
+        self._last_sample: dict | None = None
         self._subs: list[queue.Queue] = []
 
     def publish(self, event: dict) -> None:
         with self._lock:
-            self._history.append(event)
+            event = {**event, "_seq": self._seq}
+            self._seq += 1
+            kind = event.get("type")
+            if kind == "sample":
+                self._last_sample = event
+            elif kind == "metric" and not event.get("epoch_end"):
+                self._detail.append(event)
+            else:  # status, error, epoch_end metrics
+                self._pinned.append(event)
             subs = list(self._subs)
         for q in subs:
             q.put(event)
@@ -41,7 +60,10 @@ class EventBus:
     def subscribe(self) -> tuple[queue.Queue, list[dict]]:
         q: queue.Queue = queue.Queue()
         with self._lock:
-            hist = list(self._history)
+            hist = [*self._pinned, *self._detail]
+            if self._last_sample is not None:
+                hist.append(self._last_sample)
+            hist.sort(key=lambda e: e.get("_seq", 0))
             self._subs.append(q)
         return q, hist
 
@@ -52,7 +74,9 @@ class EventBus:
 
     def clear_history(self) -> None:
         with self._lock:
-            self._history.clear()
+            self._pinned.clear()
+            self._detail.clear()
+            self._last_sample = None
 
 
 class Runner:
@@ -85,17 +109,33 @@ class Runner:
                 self._trainer.stop()
 
 
-def create_app(defaults: dict) -> FastAPI:
-    """Build the app around a base config dict (data_root, n, size, ...)."""
+def create_app(defaults: dict, readonly: bool = False, autostart: bool = False) -> FastAPI:
+    """Build the app around a base config dict (data_root, n, size, ...).
+
+    readonly: spectator mode; the UI hides run controls and the control
+    endpoints refuse. autostart: kick off a run with the default config as
+    soon as the server starts (remote pods; no Start press needed).
+    """
     app = FastAPI()
     bus = EventBus()
     runner = Runner(bus)
     app.state.defaults = defaults
     app.state.runner = runner
 
+    if autostart:
+        @app.on_event("startup")
+        def _autostart() -> None:
+            runner.start(TrainConfig(**defaults))
+
     @app.get("/")
     def index() -> HTMLResponse:
-        return HTMLResponse((STATIC / "index.html").read_text())
+        html = (STATIC / "index.html").read_text()
+        if readonly:
+            html = html.replace(
+                'name="vecml-readonly" content="0"',
+                'name="vecml-readonly" content="1"',
+            )
+        return HTMLResponse(html)
 
     @app.get("/events")
     async def events(request: Request) -> StreamingResponse:
@@ -121,6 +161,8 @@ def create_app(defaults: dict) -> FastAPI:
 
     @app.post("/start")
     async def start(request: Request) -> JSONResponse:
+        if readonly:
+            return JSONResponse({"error": "read-only cockpit"}, status_code=403)
         try:
             overrides = await request.json()
         except Exception:
@@ -133,6 +175,8 @@ def create_app(defaults: dict) -> FastAPI:
 
     @app.post("/stop")
     def stop() -> JSONResponse:
+        if readonly:
+            return JSONResponse({"error": "read-only cockpit"}, status_code=403)
         runner.stop()
         return JSONResponse({"ok": True})
 
