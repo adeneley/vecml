@@ -30,11 +30,11 @@ jobs:
       # The GPU base image is ~10 GB; reclaim runner disk before pulling it.
       - name: Free disk space
         if: matrix.target == 'gpu'
-        run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
-            /opt/hostedtoolcache/CodeQL /usr/local/share/boost
-          sudo docker image prune --all --force
-          df -h /
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          large-packages: false
+          swap-storage: false
 
       - name: Checkout
         uses: actions/checkout@v4
@@ -61,4 +61,5 @@ jobs:
             ghcr.io/adeneley/vecml-${{ matrix.target }}:latest
             ghcr.io/adeneley/vecml-${{ matrix.target }}:${{ github.sha }}
           cache-from: type=gha,scope=${{ matrix.target }}
-          cache-to: type=gha,scope=${{ matrix.target }},mode=max
+          # Export a lean cache for the large GPU image to avoid disk pressure.
+          cache-to: type=gha,scope=${{ matrix.target }},mode=${{ matrix.target == 'gpu' && 'min' || 'max' }}
