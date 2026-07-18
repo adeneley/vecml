@@ -16,6 +16,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest", "ruff"]
+baselines = ["vtracer"]
 
 [build-system]
 requires = ["hatchling"]

@@ -88,6 +88,17 @@ Apple silicon. Known trap from the starter-model project: the MPS
 `non_blocking` data-corruption bug; if a Mac run mysteriously will not
 learn, inspect the tensors actually reaching the model first.
 
+## VTracer's role (baseline + stopgap, never the engine)
+
+The `baselines` extra installs VTracer (open-source tracer, pip package
+`vtracer`). It has exactly two jobs:
+1. Baseline in every eval: our full pipeline vs VTracer on the same wrecked
+   inputs. If we do not beat the free tool, stop and rethink.
+2. Stopgap back half during early training, before the Rust engine grows its
+   external label-map door (`--quant neural`): trace the model's cleaned
+   output with VTracer as a quick proxy for end-to-end results.
+The engine of record is and stays the Rust engine. Do not build on VTracer.
+
 ## Interop with the Rust engine
 
 The model's output contract is a label map the Rust engine can ingest
