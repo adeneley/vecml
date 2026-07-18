@@ -9,7 +9,7 @@
   :root {
     --bg: #f4f6f9; --panel: #ffffff; --panel2: #eaeef4; --line: #d5dbe4;
     --fg: #1c2128; --muted: #5b6575; --accent: #1f6fb2; --good: #1a7f37;
-    --bad: #cf222e; --warn: #9a6700;
+    --bad: #cf222e; --warn: #9a6700; --accent2: #8250df;
   }
   * { box-sizing: border-box; }
   body {
@@ -65,6 +65,10 @@
     color: var(--muted);
     font-family: "Poppins", -apple-system, system-ui, sans-serif;
   }
+  .legend { display: flex; gap: 12px; align-items: center; }
+  .legend .lg { display: inline-flex; align-items: center; gap: 5px;
+    font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; }
+  .legend .lg i { width: 11px; height: 3px; border-radius: 2px; display: inline-block; }
   .toggle {
     font: inherit; font-size: 11px; font-weight: 600; cursor: pointer;
     padding: 3px 10px; border-radius: 6px; border: 1px solid var(--line);
@@ -78,7 +82,7 @@
   canvas#chart { width: 100%; flex: 1 1 auto; min-height: 0; display: block;
     background: var(--panel2); border-radius: 6px; cursor: crosshair; }
   .stats { grid-column: 2; grid-row: 1; display: grid; grid-template-columns: 1fr 1fr;
-    grid-template-rows: repeat(4, minmax(0, 1fr)); gap: 8px; min-height: 0; }
+    grid-template-rows: repeat(5, minmax(0, 1fr)); gap: 8px; min-height: 0; }
   .stat { background: var(--panel2); border-radius: 8px; padding: 8px 12px;
     display: flex; flex-direction: column; justify-content: center; min-height: 0; }
   .stat .k { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
@@ -143,6 +147,10 @@
   <div class="card" id="chartWrap">
     <div class="card-head">
       <h2>training loss (L1)</h2>
+      <span class="legend">
+        <span class="lg"><i style="background:var(--accent)"></i>loss</span>
+        <span class="lg"><i style="background:var(--accent2)"></i>epoch mean</span>
+      </span>
       <span class="grow"></span>
       <button class="toggle" id="t_log" title="logarithmic y-axis">log y</button>
       <button class="toggle" id="t_ema" title="EMA smoothing">smooth</button>
@@ -155,6 +163,8 @@
     <div class="stat"><div class="k">epoch</div><div class="v" id="s_epoch">&mdash;</div></div>
     <div class="stat"><div class="k">loss now</div><div class="v" id="s_loss">&mdash;</div></div>
     <div class="stat"><div class="k">loss best</div><div class="v" id="s_best">&mdash;</div></div>
+    <div class="stat"><div class="k">epoch mean</div><div class="v" id="s_emean" style="color:var(--accent2)">&mdash;</div></div>
+    <div class="stat"><div class="k">lr</div><div class="v" id="s_lr">&mdash;</div></div>
     <div class="stat"><div class="k">img / s</div><div class="v" id="s_ips">&mdash;</div></div>
     <div class="stat"><div class="k">elapsed</div><div class="v" id="s_elapsed">&mdash;</div></div>
     <div class="stat"><div class="k">device</div><div class="v" id="s_device">&mdash;</div></div>
@@ -217,8 +227,25 @@
   const $ = (id) => document.getElementById(id);
   const runBtn = $("run"), pill = $("pill");
   let running = false, best = Infinity;
-  const losses = [];  // {step, loss, epoch}
+  const losses = [];  // {step, loss, epoch, epoch_mean, lr}
   const TARGET = 0.003;
+
+  // --- smooth client-side clock + img/s glide ---
+  // The server emits elapsed_s / img_per_s at intervals; the UI interpolates
+  // between them at 250ms so both read fluidly, re-syncing on each metric event.
+  let clockBase = 0, clockAt = 0;          // last server elapsed_s + local timestamp
+  let ipsTarget = 0, ipsShown = 0, ipsInit = false;
+  let smoothTimer = null;
+  function tickSmooth() {
+    if (running && clockAt)
+      $("s_elapsed").textContent = (clockBase + (performance.now() - clockAt) / 1000).toFixed(1) + "s";
+    if (ipsInit) {
+      ipsShown += (ipsTarget - ipsShown) * 0.25;  // EMA glide toward latest reading
+      $("s_ips").textContent = ipsShown.toFixed(1);
+    }
+  }
+  function startSmooth() { if (!smoothTimer) smoothTimer = setInterval(tickSmooth, 250); }
+  function stopSmooth() { if (smoothTimer) { clearInterval(smoothTimer); smoothTimer = null; } }
 
   // --- chart view options (persisted) ---
   let logY = localStorage.getItem("vecml_logy") === "1";
@@ -249,7 +276,8 @@
     pill.textContent = state;
     $("s_state").textContent = state;
     running = (state === "running");
-    if (running) document.body.classList.remove("idle");
+    if (running) { document.body.classList.remove("idle"); startSmooth(); }
+    else stopSmooth();
     runBtn.textContent = running ? "Stop" : "Start";
     runBtn.className = running ? "running" : "";
     runBtn.disabled = false;
@@ -344,9 +372,15 @@
     const plotW = w - padL - padR, plotH = h - padT - padB;
     const s0 = losses[0].step, s1 = losses[losses.length - 1].step;
 
-    // value domain (include target so its line stays visible)
+    // value domain (include target + epoch-mean series so both stay visible)
     let dlo = Infinity, dhi = -Infinity;
-    for (const p of losses) { if (p.loss < dlo) dlo = p.loss; if (p.loss > dhi) dhi = p.loss; }
+    for (const p of losses) {
+      if (p.loss < dlo) dlo = p.loss; if (p.loss > dhi) dhi = p.loss;
+      if (p.epoch_mean != null) {
+        if (p.epoch_mean < dlo) dlo = p.epoch_mean;
+        if (p.epoch_mean > dhi) dhi = p.epoch_mean;
+      }
+    }
     let vlo = Math.min(dlo, TARGET), vhi = dhi;
 
     let tf, inv, ticks;
@@ -422,6 +456,15 @@
       ctx.stroke();
     }
 
+    // epoch-mean series (the exit-criterion line that must cross the target)
+    const emPts = decimate(losses.filter((p) => p.epoch_mean != null), 2000);
+    if (emPts.length >= 2) {
+      ctx.strokeStyle = "#8250df"; ctx.lineWidth = 2;
+      ctx.beginPath();
+      emPts.forEach((p, i) => { const x = sx(p.step), y = sy(p.epoch_mean); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+      ctx.stroke();
+    }
+
     // best-loss marker
     if (isFinite(best)) {
       let bi = 0; for (let i = 1; i < losses.length; i++) if (losses[i].loss < losses[bi].loss) bi = i;
@@ -445,6 +488,8 @@
       // tooltip box
       const lines = ["step " + p.step, "loss " + fmtNum(p.loss),
         "epoch " + (p.epoch == null ? "-" : p.epoch)];
+      if (p.epoch_mean != null) lines.push("epoch mean " + fmtNum(p.epoch_mean));
+      if (p.lr != null) lines.push("lr " + p.lr.toExponential(2));
       ctx.font = "11px ui-monospace, Menlo, monospace";
       let tw = 0; for (const t of lines) tw = Math.max(tw, ctx.measureText(t).width);
       const bw = tw + 14, bh = lines.length * 14 + 8;
@@ -487,9 +532,21 @@
       $("s_epoch").textContent = ev.epoch;
       $("s_loss").textContent = fmt(ev.loss, 4);
       if (ev.loss < best) { best = ev.loss; $("s_best").textContent = fmt(best, 4); }
-      $("s_ips").textContent = fmt(ev.img_per_s, 1);
-      $("s_elapsed").textContent = fmt(ev.elapsed_s, 1) + "s";
-      losses.push({ step: ev.step, loss: ev.loss, epoch: ev.epoch });
+      if (ev.epoch_mean != null) $("s_emean").textContent = fmt(ev.epoch_mean, 4);
+      if (ev.lr != null) $("s_lr").textContent = ev.lr.toExponential(2);
+      // img/s: feed the glide target; snap directly when the smooth timer is idle
+      if (ev.img_per_s != null) {
+        ipsTarget = ev.img_per_s;
+        if (!ipsInit) { ipsShown = ev.img_per_s; ipsInit = true; }
+        if (!smoothTimer) $("s_ips").textContent = fmt(ev.img_per_s, 1);
+      }
+      // elapsed: re-sync the local clock so client-side drift never accumulates
+      if (ev.elapsed_s != null) {
+        clockBase = ev.elapsed_s; clockAt = performance.now();
+        if (!smoothTimer) $("s_elapsed").textContent = fmt(ev.elapsed_s, 1) + "s";
+      }
+      losses.push({ step: ev.step, loss: ev.loss, epoch: ev.epoch,
+        epoch_mean: ev.epoch_mean, lr: ev.lr });
       draw();
     } else if (ev.type === "sample") {
       showSample("f_in", "ph_in", ev.input);
@@ -530,7 +587,8 @@
       log("[ui] stop requested", "dim");
     } else {
       best = Infinity; losses.length = 0; hoverX = null; draw();
-      $("s_best").textContent = "—";
+      clockBase = 0; clockAt = 0; ipsInit = false; ipsShown = 0; ipsTarget = 0;
+      $("s_best").textContent = "—"; $("s_emean").textContent = "—"; $("s_lr").textContent = "—";
       const r = await fetch("/start", { method: "POST",
         headers: { "Content-Type": "application/json" }, body: "{}" });
       if (r.status === 409) { log("[ui] already running", "dim"); runBtn.disabled = false; }

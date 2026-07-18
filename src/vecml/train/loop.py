@@ -66,8 +66,10 @@ class TrainConfig:
     lr: float = 3e-4
     max_epochs: int = 400
     target_loss: float = 0.003
-    metric_every: int = 5
-    sample_every: int = 10
+    # Display cadence is wall-time based so it never depends on training speed
+    # (a fast local run and a slow remote one should feel the same in the UI).
+    metric_interval_s: float = 0.25
+    sample_interval_s: float = 1.0
     sample_size: int = 192
     num_workers: int = 0
     ckpt_dir: str = "runs/overfit100"
@@ -138,6 +140,11 @@ class Trainer:
         model = UNet().to(self.device)
         self.params = count_params(model)
         optim = torch.optim.Adam(model.parameters(), lr=cfg.lr)
+        # Cosine decay from lr down to ~lr/20 over the whole run, stepped once
+        # per epoch. Fixes the constant-LR bounce observed near the loss floor.
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optim, T_max=max(cfg.max_epochs, 1), eta_min=cfg.lr / 20.0
+        )
         loss_fn = nn.L1Loss()
 
         # Fixed validation item (index 0) for the live triptych. Kept on CPU
@@ -152,6 +159,9 @@ class Trainer:
         window_imgs = 0
         global_step = 0
         stopped = False
+        # Wall-clock gates for display cadence (independent of step count).
+        last_metric_t = 0.0
+        last_sample_t = 0.0
 
         for epoch in range(cfg.max_epochs):
             epoch_loss_sum = 0.0
@@ -193,8 +203,9 @@ class Trainer:
                         ckpt_dir / "best.pt",
                     )
 
-                if global_step % cfg.metric_every == 0:
-                    now = time.perf_counter()
+                now = time.perf_counter()
+                first = global_step == 1  # wake the UI on the very first step
+                if first or (now - last_metric_t) >= cfg.metric_interval_s:
                     dt = max(now - window_start, 1e-9)
                     self._emit(
                         {
@@ -202,20 +213,38 @@ class Trainer:
                             "step": global_step,
                             "epoch": epoch,
                             "loss": loss_val,
+                            "epoch_mean": epoch_loss_sum / max(epoch_items, 1),
+                            "lr": optim.param_groups[0]["lr"],
                             "img_per_s": window_imgs / dt,
                             "elapsed_s": now - start,
                         }
                     )
                     window_start = now
                     window_imgs = 0
+                    last_metric_t = now
 
-                if global_step == 1 or global_step % cfg.sample_every == 0:
+                if first or (now - last_sample_t) >= cfg.sample_interval_s:
                     self._emit_sample(model, val_x, val_y, global_step)
+                    last_sample_t = now
 
             if stopped:
                 break
 
             epoch_mean = epoch_loss_sum / max(epoch_items, 1)
+            # Final per-epoch mean point (the exit-criterion line on the chart).
+            self._emit(
+                {
+                    "type": "metric",
+                    "step": global_step,
+                    "epoch": epoch,
+                    "loss": loss_val,
+                    "epoch_mean": epoch_mean,
+                    "epoch_end": True,
+                    "lr": optim.param_groups[0]["lr"],
+                    "elapsed_s": time.perf_counter() - start,
+                }
+            )
+            scheduler.step()  # cosine LR decay, once per epoch
             if epoch_mean < cfg.target_loss:
                 self._emit(
                     {
