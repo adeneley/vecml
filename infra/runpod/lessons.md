@@ -58,3 +58,21 @@ the SSE stream. Weights were safe (volume) but the loss curve almost wasn't.
 jsonl on the volume (`runs-logs/<run>/events.jsonl`) natively, so artifacts
 survive with no observer. Until then: always attach a capture script to
 remote runs.
+
+## 9. Anonymous GHCR pulls get throttled from datacenter IPs
+Two CPU pods in a row hit `toomanyrequests` pulling vecml-cpu; one crawled at
+~5MB/s, the next fail-looped. RunPod hosts share egress IPs, so GHCR's
+anonymous rate limit is effectively already spent when your pull starts. GPU
+pulls only succeeded earlier by landing on luckier hosts.
+**Fixes (do before next fleet):** (a) register a GitHub PAT (read:packages) as
+a RunPod container-registry credential and set containerRegistryAuthId in
+deploy.sh - authenticated pulls skip the anonymous limit; (b) slim the images:
+the CPU image carries the cu128 CUDA torch (~8.3GB layer) it can never use -
+pin CPU-only torch for the cpu target (~1.5GB total).
+
+## 10. Verify live state before destructive ops
+A pod was torn down based on a pasted log snippet that was actually stale
+scrollback; the pull it showed failing had just completed. Cost: the whole
+pull, redone. Rule: before teardown/delete/restart, fetch the resource's
+CURRENT state (API call, fresh log tail) in the same minute you act on it. A
+screenshot, a paste, or "the last thing I saw" is history, not state.
