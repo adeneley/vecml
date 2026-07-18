@@ -67,7 +67,7 @@ class TrainConfig:
     max_epochs: int = 400
     target_loss: float = 0.003
     metric_every: int = 5
-    sample_every: int = 100
+    sample_every: int = 10
     sample_size: int = 192
     num_workers: int = 0
     ckpt_dir: str = "runs/overfit100"

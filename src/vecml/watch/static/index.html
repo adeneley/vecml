@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>vecml cockpit</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%231f6fb2'/%3E%3Cpolyline points='5,24 12,15 18,19 27,7' fill='none' stroke='%23fff' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3Ccircle cx='27' cy='7' r='2.6' fill='%23fff'/%3E%3C/svg%3E">
 <style>
   :root {
     --bg: #f4f6f9; --panel: #ffffff; --panel2: #eaeef4; --line: #d5dbe4;
@@ -14,65 +15,123 @@
   body {
     margin: 0; background: var(--bg); color: var(--fg);
     font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    font-variant-numeric: tabular-nums;
   }
   header {
     display: flex; align-items: center; gap: 16px;
-    padding: 14px 20px; border-bottom: 1px solid var(--line); background: var(--panel);
+    padding: 6px 20px; border-bottom: 1px solid var(--line); background: var(--panel);
   }
-  header h1 { font-size: 15px; margin: 0; font-weight: 600; letter-spacing: .3px; }
+  header h1 { font-size: 15px; margin: 0; font-weight: 600; letter-spacing: .3px;
+    font-family: "Poppins", -apple-system, system-ui, sans-serif; }
   header .spacer { flex: 1; }
   button#run {
-    font: inherit; font-weight: 600; font-size: 15px; cursor: pointer;
-    padding: 10px 26px; border-radius: 8px; border: none; color: #fff;
-    background: var(--good); transition: background .15s;
+    font: inherit; font-weight: 600; font-size: 14px; cursor: pointer;
+    padding: 6px 22px; border-radius: 8px; border: none; color: #fff;
+    background: var(--good); transition: background .15s, filter .12s, transform .06s;
   }
+  button#run:hover { filter: brightness(1.07); }
+  button#run:active { transform: translateY(1px); }
   button#run.running { background: var(--bad); }
   button#run:disabled { opacity: .6; cursor: default; }
   .pill {
     font-size: 12px; font-weight: 600; padding: 5px 12px; border-radius: 20px;
     background: var(--panel2); color: var(--muted); border: 1px solid var(--line);
   }
-  .pill.running { color: var(--accent); border-color: var(--accent); }
+  .pill.running { color: var(--accent); border-color: var(--accent);
+    animation: pulse 1.6s ease-in-out infinite; }
   .pill.finished { color: var(--good); border-color: var(--good); }
   .pill.error, .pill.stopped { color: var(--bad); border-color: var(--bad); }
-  main { display: grid; grid-template-columns: 1.4fr 1fr; gap: 16px; padding: 16px 20px; }
+  @keyframes pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(31,111,178,.35); }
+    50% { box-shadow: 0 0 0 5px rgba(31,111,178,0); }
+  }
+  html, body { height: 100%; overflow: hidden; }
+  main {
+    display: grid; grid-template-columns: 1.4fr 1fr;
+    grid-template-rows: minmax(0, 1fr) minmax(0, 1.35fr) minmax(0, 0.6fr);
+    gap: 12px; padding: 12px 20px;
+    height: calc(100vh - 42px); box-sizing: border-box;
+  }
   .card {
     background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
-    padding: 14px 16px;
+    padding: 12px 16px; display: flex; flex-direction: column; min-height: 0;
   }
+  .card-head { flex: 0 0 auto; display: flex; align-items: center; gap: 12px;
+    margin: 0 0 10px; }
+  .card-head h2 { margin: 0; }
+  .card-head .grow { flex: 1; }
   .card h2 {
     font-size: 12px; text-transform: uppercase; letter-spacing: .6px;
-    color: var(--muted); margin: 0 0 10px;
+    color: var(--muted);
+    font-family: "Poppins", -apple-system, system-ui, sans-serif;
   }
-  #chartWrap { grid-column: 1; }
-  canvas#chart { width: 100%; height: 260px; display: block; background: var(--panel2);
-    border-radius: 6px; }
-  .stats { grid-column: 2; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-  .stat { background: var(--panel2); border-radius: 8px; padding: 10px 12px; }
+  .toggle {
+    font: inherit; font-size: 11px; font-weight: 600; cursor: pointer;
+    padding: 3px 10px; border-radius: 6px; border: 1px solid var(--line);
+    background: var(--panel2); color: var(--muted);
+    transition: border-color .12s, color .12s, background .12s, transform .06s;
+  }
+  .toggle:hover { border-color: var(--accent); color: var(--accent); }
+  .toggle:active { transform: translateY(1px); }
+  .toggle.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+  #chartWrap { grid-column: 1; grid-row: 1; }
+  canvas#chart { width: 100%; flex: 1 1 auto; min-height: 0; display: block;
+    background: var(--panel2); border-radius: 6px; cursor: crosshair; }
+  .stats { grid-column: 2; grid-row: 1; display: grid; grid-template-columns: 1fr 1fr;
+    grid-template-rows: repeat(4, minmax(0, 1fr)); gap: 8px; min-height: 0; }
+  .stat { background: var(--panel2); border-radius: 8px; padding: 8px 12px;
+    display: flex; flex-direction: column; justify-content: center; min-height: 0; }
   .stat .k { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
-  .stat .v { font-size: 20px; font-weight: 600; margin-top: 3px; font-variant-numeric: tabular-nums; }
-  .triptych { grid-column: 1 / -1; }
-  .frames { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
-  .frame { text-align: center; }
-  .frame .lbl { font-size: 11px; color: var(--muted); text-transform: uppercase;
-    letter-spacing: .5px; margin-bottom: 6px; }
-  .frame img {
-    width: 100%; max-width: 220px; image-rendering: pixelated;
-    border-radius: 6px; background: var(--panel2); aspect-ratio: 1; object-fit: contain;
+  .stat .v { font-size: 20px; font-weight: 600; margin-top: 3px; font-variant-numeric: tabular-nums;
+    transition: opacity .3s, color .3s; }
+  body.idle .stat .v { opacity: .4; color: var(--muted); }
+  .triptych { grid-column: 1 / -1; grid-row: 2; }
+  .frames { flex: 1 1 auto; min-height: 0; display: grid;
+    grid-template-columns: repeat(3, 1fr); gap: 12px; justify-items: center; }
+  .frame { text-align: center; display: flex; flex-direction: column;
+    align-items: center; min-height: 0; width: 100%; }
+  .frame .lbl { flex: 0 0 auto; font-size: 11px; color: var(--muted);
+    text-transform: uppercase; letter-spacing: .5px; margin-bottom: 6px; }
+  /* square "mounted print" tile: fits row both ways, image centred with a uniform mat */
+  .tilewrap { flex: 1 1 auto; min-height: 0; width: 100%;
+    display: flex; align-items: center; justify-content: center; }
+  .tile {
+    aspect-ratio: 1; max-width: 100%; max-height: 100%;
+    background: var(--panel2); border: 1px solid var(--line); border-radius: 10px;
+    padding: 7%; display: flex; align-items: center; justify-content: center;
   }
-  .cap { text-align: center; color: var(--muted); font-size: 12px; margin-top: 8px; }
-  .console { grid-column: 1 / -1; }
+  .tile img {
+    width: 100%; height: 100%; object-fit: contain; image-rendering: pixelated;
+    border-radius: 4px; transition: opacity .25s ease;
+  }
+  .tile img.flash { animation: frameflash .55s ease-out; }
+  @keyframes frameflash {
+    0% { box-shadow: 0 0 0 0 rgba(31,111,178,.55); }
+    100% { box-shadow: 0 0 0 6px rgba(31,111,178,0); }
+  }
+  .ph {
+    width: 100%; height: 100%;
+    border: 1.5px dashed var(--line); border-radius: 6px; background: rgba(255,255,255,.4);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 8px; color: var(--muted);
+  }
+  .ph svg { width: 34%; max-width: 56px; height: auto; opacity: .55; }
+  .ph .pht { font-size: 10px; text-transform: uppercase; letter-spacing: .6px; opacity: .7; }
+  .cap { flex: 0 0 auto; text-align: center; color: var(--muted); font-size: 12px;
+    font-variant-numeric: tabular-nums; }
+  .console { grid-column: 1 / -1; grid-row: 3; }
   #log {
-    height: 200px; overflow-y: auto; background: #eaeef4; border-radius: 6px;
+    flex: 1 1 auto; min-height: 0; overflow-y: auto; background: #eaeef4; border-radius: 6px;
     padding: 10px 12px; font: 12px/1.5 ui-monospace, "SF Mono", Menlo, monospace;
-    white-space: pre-wrap; color: #333c48;
+    white-space: pre-wrap; color: #333c48; font-variant-numeric: tabular-nums;
   }
   #log .err { color: var(--bad); }
   #log .ok { color: var(--good); }
   #log .dim { color: var(--muted); }
+  #log .ts { color: var(--muted); opacity: .75; }
 </style>
 </head>
-<body>
+<body class="idle">
 <header>
   <h1>vecml cockpit</h1>
   <span id="pill" class="pill">idle</span>
@@ -82,33 +141,72 @@
 
 <main>
   <div class="card" id="chartWrap">
-    <h2>training loss (L1)</h2>
+    <div class="card-head">
+      <h2>training loss (L1)</h2>
+      <span class="grow"></span>
+      <button class="toggle" id="t_log" title="logarithmic y-axis">log y</button>
+      <button class="toggle" id="t_ema" title="EMA smoothing">smooth</button>
+    </div>
     <canvas id="chart"></canvas>
   </div>
 
   <div class="stats">
-    <div class="stat"><div class="k">step</div><div class="v" id="s_step">-</div></div>
-    <div class="stat"><div class="k">epoch</div><div class="v" id="s_epoch">-</div></div>
-    <div class="stat"><div class="k">loss now</div><div class="v" id="s_loss">-</div></div>
-    <div class="stat"><div class="k">loss best</div><div class="v" id="s_best">-</div></div>
-    <div class="stat"><div class="k">img / s</div><div class="v" id="s_ips">-</div></div>
-    <div class="stat"><div class="k">elapsed</div><div class="v" id="s_elapsed">-</div></div>
-    <div class="stat"><div class="k">device</div><div class="v" id="s_device">-</div></div>
+    <div class="stat"><div class="k">step</div><div class="v" id="s_step">&mdash;</div></div>
+    <div class="stat"><div class="k">epoch</div><div class="v" id="s_epoch">&mdash;</div></div>
+    <div class="stat"><div class="k">loss now</div><div class="v" id="s_loss">&mdash;</div></div>
+    <div class="stat"><div class="k">loss best</div><div class="v" id="s_best">&mdash;</div></div>
+    <div class="stat"><div class="k">img / s</div><div class="v" id="s_ips">&mdash;</div></div>
+    <div class="stat"><div class="k">elapsed</div><div class="v" id="s_elapsed">&mdash;</div></div>
+    <div class="stat"><div class="k">device</div><div class="v" id="s_device">&mdash;</div></div>
     <div class="stat"><div class="k">state</div><div class="v" id="s_state">idle</div></div>
   </div>
 
   <div class="card triptych">
-    <h2>live sample &mdash; input | prediction | target</h2>
-    <div class="frames">
-      <div class="frame"><div class="lbl">input (wrecked)</div><img id="f_in" alt=""></div>
-      <div class="frame"><div class="lbl">prediction</div><img id="f_pred" alt=""></div>
-      <div class="frame"><div class="lbl">target (clean)</div><img id="f_tgt" alt=""></div>
+    <div class="card-head">
+      <h2>live sample &mdash; input | prediction | target</h2>
+      <span class="grow"></span>
+      <span class="cap" id="tri_cap">no sample yet</span>
     </div>
-    <div class="cap" id="tri_cap">no sample yet</div>
+    <div class="frames">
+      <div class="frame">
+        <div class="lbl">input (wrecked)</div>
+        <div class="tilewrap"><div class="tile">
+          <div class="ph" id="ph_in">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 16l5-5 4 4 3-3 6 6" stroke-linecap="round" stroke-linejoin="round"/><path d="M2 3l20 18" stroke-linecap="round" opacity=".5"/></svg>
+            <span class="pht">awaiting</span>
+          </div>
+          <img id="f_in" alt="" hidden>
+        </div></div>
+      </div>
+      <div class="frame">
+        <div class="lbl">prediction</div>
+        <div class="tilewrap"><div class="tile">
+          <div class="ph" id="ph_pred">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="8" stroke-dasharray="2.5 3" stroke-linecap="round"/><path d="M12 8v4l3 2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <span class="pht">awaiting</span>
+          </div>
+          <img id="f_pred" alt="" hidden>
+        </div></div>
+      </div>
+      <div class="frame">
+        <div class="lbl">target (clean)</div>
+        <div class="tilewrap"><div class="tile">
+          <div class="ph" id="ph_tgt">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.5"/></svg>
+            <span class="pht">awaiting</span>
+          </div>
+          <img id="f_tgt" alt="" hidden>
+        </div></div>
+      </div>
+    </div>
   </div>
 
   <div class="card console">
-    <h2>console</h2>
+    <div class="card-head">
+      <h2>console</h2>
+      <span class="grow"></span>
+      <button class="toggle" id="t_clear" title="clear console">clear</button>
+    </div>
     <div id="log"></div>
   </div>
 </main>
@@ -119,15 +217,31 @@
   const $ = (id) => document.getElementById(id);
   const runBtn = $("run"), pill = $("pill");
   let running = false, best = Infinity;
-  const losses = [];  // {step, loss}
+  const losses = [];  // {step, loss, epoch}
+  const TARGET = 0.003;
+
+  // --- chart view options (persisted) ---
+  let logY = localStorage.getItem("vecml_logy") === "1";
+  let ema = localStorage.getItem("vecml_ema") !== "0"; // default on
+  let hoverX = null;
+
+  function pad2(n) { return (n < 10 ? "0" : "") + n; }
+  function stamp() {
+    const d = new Date();
+    return pad2(d.getHours()) + ":" + pad2(d.getMinutes()) + ":" + pad2(d.getSeconds());
+  }
 
   function log(msg, cls) {
     const el = $("log");
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 4;
     const line = document.createElement("div");
     if (cls) line.className = cls;
-    line.textContent = msg;
+    const ts = document.createElement("span");
+    ts.className = "ts"; ts.textContent = stamp() + " ";
+    line.appendChild(ts);
+    line.appendChild(document.createTextNode(msg));
     el.appendChild(line);
-    el.scrollTop = el.scrollHeight;
+    if (atBottom) el.scrollTop = el.scrollHeight; // only auto-scroll if user was at bottom
   }
 
   function setState(state, detail) {
@@ -135,6 +249,7 @@
     pill.textContent = state;
     $("s_state").textContent = state;
     running = (state === "running");
+    if (running) document.body.classList.remove("idle");
     runBtn.textContent = running ? "Stop" : "Start";
     runBtn.className = running ? "running" : "";
     runBtn.disabled = false;
@@ -148,34 +263,216 @@
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   }
   window.addEventListener("resize", () => { sizeCanvas(); draw(); });
+  new ResizeObserver(() => { sizeCanvas(); draw(); }).observe(cv);
+  cv.addEventListener("mousemove", (e) => {
+    const r = cv.getBoundingClientRect();
+    hoverX = e.clientX - r.left;
+    draw();
+  });
+  cv.addEventListener("mouseleave", () => { hoverX = null; draw(); });
+
+  // sensible number formatting for tick labels
+  function fmtNum(v) {
+    if (v === 0) return "0";
+    const a = Math.abs(v);
+    if (a < 0.001 || a >= 100000) return v.toExponential(1);
+    return parseFloat(v.toPrecision(3)).toString();
+  }
+  function fmtStep(v) {
+    v = Math.round(v);
+    return v >= 10000 ? (v / 1000).toFixed(v % 1000 ? 1 : 0) + "k" : String(v);
+  }
+  function niceTicks(lo, hi, count) {
+    const range = (hi - lo) || 1;
+    const raw = range / count;
+    const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+    const norm = raw / mag;
+    let step = norm < 1.5 ? 1 : norm < 3 ? 2 : norm < 7 ? 5 : 10;
+    step *= mag;
+    const out = [];
+    for (let v = Math.ceil(lo / step) * step; v <= hi + step * 1e-3; v += step) out.push(v);
+    return out;
+  }
+  function logTicks(lo, hi) {
+    const out = [];
+    const emin = Math.floor(Math.log10(lo)), emax = Math.ceil(Math.log10(hi));
+    for (let e = emin; e <= emax; e++)
+      for (const m of [1, 2, 5]) {
+        const v = m * Math.pow(10, e);
+        if (v >= lo * 0.999 && v <= hi * 1.001) out.push(v);
+      }
+    return out;
+  }
+  function decimate(arr, max) {
+    if (arr.length <= max) return arr;
+    const k = Math.ceil(arr.length / max), out = [];
+    for (let i = 0; i < arr.length; i += k) out.push(arr[i]);
+    if (out[out.length - 1] !== arr[arr.length - 1]) out.push(arr[arr.length - 1]);
+    return out;
+  }
+  function computeEma(pts, alpha) {
+    const out = []; let m = pts[0].loss;
+    for (const p of pts) { m = alpha * m + (1 - alpha) * p.loss; out.push({ step: p.step, loss: m }); }
+    return out;
+  }
+  function nearestIdx(step) {
+    let lo = 0, hi = losses.length - 1;
+    while (lo < hi) { const m = (lo + hi) >> 1; if (losses[m].step < step) lo = m + 1; else hi = m; }
+    if (lo > 0 && Math.abs(losses[lo - 1].step - step) < Math.abs(losses[lo].step - step)) return lo - 1;
+    return lo;
+  }
+
+  function drawIdle(w, h) {
+    // faint gridlines + centred hint
+    ctx.strokeStyle = "rgba(90,101,117,.14)"; ctx.lineWidth = 1;
+    for (let i = 1; i <= 4; i++) {
+      const y = h * i / 5;
+      ctx.beginPath(); ctx.moveTo(30, y); ctx.lineTo(w - 12, y); ctx.stroke();
+    }
+    ctx.fillStyle = "#8b95a4"; ctx.textAlign = "center";
+    ctx.font = "600 13px system-ui";
+    ctx.fillText("press Start · loss appears here", w / 2, h / 2);
+    ctx.textAlign = "left";
+  }
 
   function draw() {
-    const w = cv.clientWidth, h = cv.clientHeight, pad = 34;
+    const w = cv.clientWidth, h = cv.clientHeight;
     ctx.clearRect(0, 0, w, h);
-    if (losses.length < 2) return;
-    let lo = Infinity, hi = -Infinity, s0 = losses[0].step, s1 = losses[losses.length - 1].step;
-    for (const p of losses) { if (p.loss < lo) lo = p.loss; if (p.loss > hi) hi = p.loss; }
-    if (hi === lo) hi = lo + 1e-6;
-    const sx = (s) => pad + (w - pad - 8) * (s - s0) / Math.max(s1 - s0, 1);
-    const sy = (v) => 8 + (h - pad - 8) * (1 - (v - lo) / (hi - lo));
-    // gridlines + y labels
-    ctx.strokeStyle = "#d5dbe4"; ctx.fillStyle = "#5b6575"; ctx.font = "11px system-ui";
-    ctx.lineWidth = 1;
-    for (let i = 0; i <= 4; i++) {
-      const v = lo + (hi - lo) * i / 4, y = sy(v);
-      ctx.beginPath(); ctx.moveTo(pad, y); ctx.lineTo(w - 8, y); ctx.stroke();
-      ctx.fillText(v.toFixed(4), 2, y + 3);
+    if (losses.length < 2) { drawIdle(w, h); return; }
+
+    const padL = 48, padR = 12, padT = 10, padB = 22;
+    const plotW = w - padL - padR, plotH = h - padT - padB;
+    const s0 = losses[0].step, s1 = losses[losses.length - 1].step;
+
+    // value domain (include target so its line stays visible)
+    let dlo = Infinity, dhi = -Infinity;
+    for (const p of losses) { if (p.loss < dlo) dlo = p.loss; if (p.loss > dhi) dhi = p.loss; }
+    let vlo = Math.min(dlo, TARGET), vhi = dhi;
+
+    let tf, inv, ticks;
+    if (logY) {
+      vlo = Math.max(vlo, 1e-9);
+      tf = (v) => Math.log10(Math.max(v, 1e-9));
+      let tlo = tf(vlo), thi = tf(vhi);
+      if (thi - tlo < 1e-6) thi = tlo + 1;
+      const decLo = Math.pow(10, Math.floor(tlo)), decHi = Math.pow(10, Math.ceil(thi));
+      vlo = decLo; vhi = decHi;
+      tlo = tf(vlo); thi = tf(vhi);
+      inv = { lo: tlo, hi: thi };
+      ticks = logTicks(vlo, vhi);
+    } else {
+      const padv = (vhi - vlo) * 0.06 || 1e-4;
+      vlo -= padv; vhi += padv;
+      tf = (v) => v;
+      inv = { lo: vlo, hi: vhi };
+      ticks = niceTicks(vlo, vhi, 4);
     }
-    // polyline
-    ctx.strokeStyle = "#1f6fb2"; ctx.lineWidth = 2; ctx.beginPath();
-    losses.forEach((p, i) => {
-      const x = sx(p.step), y = sy(p.loss);
-      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-    });
+
+    const sx = (s) => padL + plotW * (s - s0) / Math.max(s1 - s0, 1);
+    const sy = (v) => padT + plotH * (1 - (tf(v) - inv.lo) / (inv.hi - inv.lo));
+
+    // horizontal gridlines + y labels
+    ctx.strokeStyle = "#d5dbe4"; ctx.fillStyle = "#5b6575";
+    ctx.font = "11px ui-monospace, Menlo, monospace"; ctx.lineWidth = 1; ctx.textAlign = "left";
+    for (const v of ticks) {
+      const y = sy(v);
+      if (y < padT - 1 || y > padT + plotH + 1) continue;
+      ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(w - padR, y); ctx.stroke();
+      ctx.fillText(fmtNum(v), 4, y + 3);
+    }
+    // x gridlines + labels
+    const xticks = niceTicks(s0, s1, 5);
+    ctx.textAlign = "center";
+    for (const s of xticks) {
+      if (s < s0 || s > s1) continue;
+      const x = sx(s);
+      ctx.strokeStyle = "#e2e7ee";
+      ctx.beginPath(); ctx.moveTo(x, padT); ctx.lineTo(x, padT + plotH); ctx.stroke();
+      ctx.fillStyle = "#5b6575"; ctx.fillText(fmtStep(s), x, h - 6);
+    }
+    ctx.textAlign = "left";
+
+    // target reference line
+    const ty = sy(TARGET);
+    if (ty >= padT && ty <= padT + plotH) {
+      ctx.save();
+      ctx.strokeStyle = "#9a6700"; ctx.setLineDash([5, 4]); ctx.lineWidth = 1.2;
+      ctx.beginPath(); ctx.moveTo(padL, ty); ctx.lineTo(w - padR, ty); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = "#9a6700"; ctx.font = "10px system-ui"; ctx.textAlign = "right";
+      ctx.fillText("target " + fmtNum(TARGET), w - padR - 2, ty - 4);
+      ctx.textAlign = "left";
+      ctx.restore();
+    }
+
+    // raw line (faint if smoothing is on, else the main line)
+    const rawPts = decimate(losses, 2000);
+    ctx.strokeStyle = ema ? "rgba(31,111,178,.28)" : "#1f6fb2";
+    ctx.lineWidth = ema ? 1 : 2;
+    ctx.beginPath();
+    rawPts.forEach((p, i) => { const x = sx(p.step), y = sy(p.loss); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
     ctx.stroke();
+
+    // EMA line (bold on top)
+    if (ema) {
+      const emaPts = decimate(computeEma(losses, 0.9), 2000);
+      ctx.strokeStyle = "#1f6fb2"; ctx.lineWidth = 2;
+      ctx.beginPath();
+      emaPts.forEach((p, i) => { const x = sx(p.step), y = sy(p.loss); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+      ctx.stroke();
+    }
+
+    // best-loss marker
+    if (isFinite(best)) {
+      let bi = 0; for (let i = 1; i < losses.length; i++) if (losses[i].loss < losses[bi].loss) bi = i;
+      const bx = sx(losses[bi].step), by = sy(losses[bi].loss);
+      ctx.fillStyle = "#1a7f37";
+      ctx.beginPath(); ctx.arc(bx, by, 3.5, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = "#fff"; ctx.lineWidth = 1.2; ctx.stroke();
+    }
+
+    // hover crosshair + tooltip
+    if (hoverX != null && hoverX >= padL && hoverX <= w - padR) {
+      const step = s0 + (hoverX - padL) / plotW * (s1 - s0);
+      const p = losses[nearestIdx(step)];
+      const x = sx(p.step), y = sy(p.loss);
+      ctx.strokeStyle = "rgba(28,33,40,.35)"; ctx.lineWidth = 1; ctx.setLineDash([3, 3]);
+      ctx.beginPath(); ctx.moveTo(x, padT); ctx.lineTo(x, padT + plotH); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = "#1c2128";
+      ctx.beginPath(); ctx.arc(x, y, 3.5, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = "#fff"; ctx.lineWidth = 1.2; ctx.stroke();
+      // tooltip box
+      const lines = ["step " + p.step, "loss " + fmtNum(p.loss),
+        "epoch " + (p.epoch == null ? "-" : p.epoch)];
+      ctx.font = "11px ui-monospace, Menlo, monospace";
+      let tw = 0; for (const t of lines) tw = Math.max(tw, ctx.measureText(t).width);
+      const bw = tw + 14, bh = lines.length * 14 + 8;
+      let bx = x + 10; if (bx + bw > w - padR) bx = x - bw - 10;
+      let by = padT + 6;
+      ctx.fillStyle = "rgba(255,255,255,.96)"; ctx.strokeStyle = "#d5dbe4"; ctx.lineWidth = 1;
+      ctx.beginPath();
+      if (ctx.roundRect) ctx.roundRect(bx, by, bw, bh, 6);
+      else ctx.rect(bx, by, bw, bh);
+      ctx.fill(); ctx.stroke();
+      ctx.fillStyle = "#1c2128"; ctx.textAlign = "left";
+      lines.forEach((t, i) => ctx.fillText(t, bx + 7, by + 15 + i * 14));
+    }
   }
 
   function fmt(x, d) { return (x === undefined || x === null) ? "-" : Number(x).toFixed(d); }
+
+  function showSample(imgId, phId, b64) {
+    const img = $(imgId), ph = $(phId);
+    if (ph) ph.style.display = "none";
+    if (img.hidden) img.hidden = false;
+    img.style.opacity = "0.35";
+    img.src = "data:image/png;base64," + b64;
+    img.classList.remove("flash");
+    void img.offsetWidth; // restart animation
+    img.classList.add("flash");
+    requestAnimationFrame(() => { img.style.opacity = "1"; });
+  }
 
   function onEvent(ev) {
     if (ev.type === "status") {
@@ -185,24 +482,39 @@
       log("[status] " + ev.state + (ev.detail ? " - " + ev.detail : ""),
           ev.state === "error" ? "err" : (ev.state === "finished" ? "ok" : "dim"));
     } else if (ev.type === "metric") {
+      document.body.classList.remove("idle");
       $("s_step").textContent = ev.step;
       $("s_epoch").textContent = ev.epoch;
       $("s_loss").textContent = fmt(ev.loss, 4);
       if (ev.loss < best) { best = ev.loss; $("s_best").textContent = fmt(best, 4); }
       $("s_ips").textContent = fmt(ev.img_per_s, 1);
       $("s_elapsed").textContent = fmt(ev.elapsed_s, 1) + "s";
-      losses.push({ step: ev.step, loss: ev.loss });
+      losses.push({ step: ev.step, loss: ev.loss, epoch: ev.epoch });
       draw();
     } else if (ev.type === "sample") {
-      $("f_in").src = "data:image/png;base64," + ev.input;
-      $("f_pred").src = "data:image/png;base64," + ev.pred;
-      $("f_tgt").src = "data:image/png;base64," + ev.target;
+      showSample("f_in", "ph_in", ev.input);
+      showSample("f_pred", "ph_pred", ev.pred);
+      showSample("f_tgt", "ph_tgt", ev.target);
       $("tri_cap").textContent = "step " + ev.step;
     } else if (ev.type === "error") {
       log("[error] " + ev.message, "err");
       if (ev.traceback) log(ev.traceback, "err");
     }
   }
+
+  // --- chart controls ---
+  function syncToggles() {
+    $("t_log").classList.toggle("on", logY);
+    $("t_ema").classList.toggle("on", ema);
+  }
+  $("t_log").addEventListener("click", () => {
+    logY = !logY; localStorage.setItem("vecml_logy", logY ? "1" : "0"); syncToggles(); draw();
+  });
+  $("t_ema").addEventListener("click", () => {
+    ema = !ema; localStorage.setItem("vecml_ema", ema ? "1" : "0"); syncToggles(); draw();
+  });
+  $("t_clear").addEventListener("click", () => { $("log").innerHTML = ""; });
+  syncToggles();
 
   // --- SSE ---
   function connect() {
@@ -217,8 +529,8 @@
       await fetch("/stop", { method: "POST" });
       log("[ui] stop requested", "dim");
     } else {
-      best = Infinity; losses.length = 0; draw();
-      $("s_best").textContent = "-";
+      best = Infinity; losses.length = 0; hoverX = null; draw();
+      $("s_best").textContent = "—";
       const r = await fetch("/start", { method: "POST",
         headers: { "Content-Type": "application/json" }, body: "{}" });
       if (r.status === 409) { log("[ui] already running", "dim"); runBtn.disabled = false; }
@@ -226,7 +538,9 @@
     }
   });
 
+  log("cockpit ready · waiting for launch", "dim");
   sizeCanvas();
+  draw();
   connect();
 })();
 </script>
