@@ -16,6 +16,24 @@ before you rely on it.
 
 ---
 
+## 0. Container images
+
+Two images are built on x86 by GitHub Actions (`.github/workflows/docker.yml`)
+from `Dockerfile` and published to GHCR as **public** packages, so a pod pulls
+them with no registry credentials:
+
+- `ghcr.io/adeneley/vecml-cpu:latest` — CPU-only work (sharding, wrecking,
+  dataset prep, eval, inference).
+- `ghcr.io/adeneley/vecml-gpu:latest` — CUDA base for training on GPU cards.
+
+Each push is also tagged with the commit sha. The workflow rebuilds only when
+`pyproject.toml`, `uv.lock`, or anything under `infra/runpod/` changes (or on
+manual dispatch); the repo source itself is pulled at pod start, so a code
+commit needs no rebuild. Point `deploy.sh` at one of these via `--image` or
+`VECML_IMAGE`, e.g. `--image ghcr.io/adeneley/vecml-gpu:latest`.
+
+---
+
 ## 1. One-time setup (only you can do these)
 
 These are console + account actions. The scaffolding cannot and must not do them.

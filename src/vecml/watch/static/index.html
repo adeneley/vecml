@@ -109,12 +109,25 @@
     border-radius: 4px; transition: opacity .25s ease;
   }
   .tile img.flash { animation: frameflash .55s ease-out; }
-  /* 4-up view: 4 samples as columns, prediction row over target row */
-  .frames.multi { grid-template-columns: auto repeat(4, 1fr); gap: 8px; }
-  .frames.multi .rowlbl { font-size: 10px; color: var(--muted); text-transform: uppercase;
-    letter-spacing: .5px; writing-mode: vertical-rl; transform: rotate(180deg);
-    align-self: center; justify-self: center; }
-  .frames.multi .tile { padding: 5%; border-radius: 8px; }
+  /* 4-up view: four framed pairs, prediction mounted over its target */
+  .frames.quad { grid-template-columns: repeat(4, 1fr); gap: 16px; }
+  .pairwrap { display: flex; align-items: center; justify-content: center;
+    min-height: 0; min-width: 0; }
+  .pair { height: 100%; max-width: 100%; aspect-ratio: 1 / 2;
+    display: flex; flex-direction: column;
+    background: var(--panel2); border: 1px solid var(--line); border-radius: 10px;
+    padding: 9px; }
+  .pair .half { flex: 1 1 0; min-height: 0; position: relative;
+    display: flex; align-items: center; justify-content: center; }
+  .pair .half img { max-width: 100%; max-height: 100%; object-fit: contain;
+    image-rendering: pixelated; border-radius: 4px; transition: opacity .25s ease; }
+  .pair .pdiv { flex: 0 0 auto; height: 1px; background: var(--line); margin: 7px 6px; }
+  .pair .htag { position: absolute; top: 4px; left: 4px; z-index: 1;
+    font-size: 9px; text-transform: uppercase; letter-spacing: .6px;
+    color: var(--muted); background: rgba(255,255,255,.82);
+    padding: 1px 5px; border-radius: 3px; pointer-events: none; }
+  .pair .ph { border-width: 1px; }
+  .pair .ph svg { max-width: 30px; }
   @keyframes frameflash {
     0% { box-shadow: 0 0 0 0 rgba(31,111,178,.55); }
     100% { box-shadow: 0 0 0 6px rgba(31,111,178,0); }
@@ -185,17 +198,27 @@
       <button class="toggle" id="t_multi" title="show 4 validation samples, prediction vs target">4-up</button>
       <span class="cap" id="tri_cap">no sample yet</span>
     </div>
-    <div class="frames multi" id="frames4" hidden>
-      <div class="rowlbl">prediction</div>
-      <div class="tilewrap"><div class="tile"><div class="ph" id="ph_p0"><span class="pht">awaiting</span></div><img id="m_p0" alt="" hidden></div></div>
-      <div class="tilewrap"><div class="tile"><div class="ph" id="ph_p1"><span class="pht">awaiting</span></div><img id="m_p1" alt="" hidden></div></div>
-      <div class="tilewrap"><div class="tile"><div class="ph" id="ph_p2"><span class="pht">awaiting</span></div><img id="m_p2" alt="" hidden></div></div>
-      <div class="tilewrap"><div class="tile"><div class="ph" id="ph_p3"><span class="pht">awaiting</span></div><img id="m_p3" alt="" hidden></div></div>
-      <div class="rowlbl">target</div>
-      <div class="tilewrap"><div class="tile"><div class="ph" id="ph_t0"><span class="pht">awaiting</span></div><img id="m_t0" alt="" hidden></div></div>
-      <div class="tilewrap"><div class="tile"><div class="ph" id="ph_t1"><span class="pht">awaiting</span></div><img id="m_t1" alt="" hidden></div></div>
-      <div class="tilewrap"><div class="tile"><div class="ph" id="ph_t2"><span class="pht">awaiting</span></div><img id="m_t2" alt="" hidden></div></div>
-      <div class="tilewrap"><div class="tile"><div class="ph" id="ph_t3"><span class="pht">awaiting</span></div><img id="m_t3" alt="" hidden></div></div>
+    <div class="frames quad" id="frames4" hidden>
+      <div class="pairwrap"><div class="pair">
+        <div class="half"><span class="htag">pred</span><div class="ph" id="ph_p0"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="8" stroke-dasharray="2.5 3"/></svg></div><img id="m_p0" alt="" hidden></div>
+        <div class="pdiv"></div>
+        <div class="half"><span class="htag">target</span><div class="ph" id="ph_t0"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="8"/></svg></div><img id="m_t0" alt="" hidden></div>
+      </div></div>
+      <div class="pairwrap"><div class="pair">
+        <div class="half"><div class="ph" id="ph_p1"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="8" stroke-dasharray="2.5 3"/></svg></div><img id="m_p1" alt="" hidden></div>
+        <div class="pdiv"></div>
+        <div class="half"><div class="ph" id="ph_t1"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="8"/></svg></div><img id="m_t1" alt="" hidden></div>
+      </div></div>
+      <div class="pairwrap"><div class="pair">
+        <div class="half"><div class="ph" id="ph_p2"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="8" stroke-dasharray="2.5 3"/></svg></div><img id="m_p2" alt="" hidden></div>
+        <div class="pdiv"></div>
+        <div class="half"><div class="ph" id="ph_t2"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="8"/></svg></div><img id="m_t2" alt="" hidden></div>
+      </div></div>
+      <div class="pairwrap"><div class="pair">
+        <div class="half"><div class="ph" id="ph_p3"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="8" stroke-dasharray="2.5 3"/></svg></div><img id="m_p3" alt="" hidden></div>
+        <div class="pdiv"></div>
+        <div class="half"><div class="ph" id="ph_t3"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="8"/></svg></div><img id="m_t3" alt="" hidden></div>
+      </div></div>
     </div>
     <div class="frames" id="frames1">
       <div class="frame">

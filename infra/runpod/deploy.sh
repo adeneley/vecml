@@ -37,7 +37,7 @@ CPU_VCPU_RATE=0.034   # UNVERIFIED, console-only. Assumed compute-optimized rate
 
 # ---- defaults --------------------------------------------------------------
 MODE="gpu"; GPU="RTX5090"; VCPU=32; MINUTES=30; SPOT="false"; YES="false"
-IMAGE="${VECML_IMAGE:-}"                       # your pushed image, e.g. ghcr.io/adeneley/vecml:gpu
+IMAGE="${VECML_IMAGE:-}"                       # public GHCR image, e.g. ghcr.io/adeneley/vecml-gpu:latest (or -cpu)
 JOB_CMD=""; REPO_REF="${REPO_REF:-main}"
 CONTAINER_DISK_GB="${CONTAINER_DISK_GB:-50}"
 VOL_ROOT="${VOL_ROOT:-/workspace}"

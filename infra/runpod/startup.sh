@@ -18,7 +18,7 @@
 #   RUN_NAME    label for this run's log dir (default: derived from timestamp)
 set -Eeuo pipefail
 
-REPO_URL="${REPO_URL:-https://github.com/adeneley/vectorizer-ml.git}"  # UNVERIFIED remote; set explicitly in deploy
+REPO_URL="${REPO_URL:-https://github.com/adeneley/vecml.git}"
 REPO_REF="${REPO_REF:-main}"
 VOL_ROOT="${VOL_ROOT:-/workspace}"
 RUN_NAME="${RUN_NAME:-run-$(date -u +%Y%m%d-%H%M%S)}"
