@@ -49,3 +49,12 @@ the loop running while fixing; each lap costs cents.
 No SSH key is configured on pods; the boot log tee'd to
 `runs-logs/<run>/console.log` on the volume (readable over S3 from anywhere)
 was enough to solve every issue above. Keep the tee.
+
+## 8. Telemetry must persist server-side, not listener-side
+The cockpit's event history lives in server memory and dies with the pod; the
+PoC's full telemetry survived only because an external script was capturing
+the SSE stream. Weights were safe (volume) but the loss curve almost wasn't.
+**Deferred fix:** the trainer should append every metric/status event to a
+jsonl on the volume (`runs-logs/<run>/events.jsonl`) natively, so artifacts
+survive with no observer. Until then: always attach a capture script to
+remote runs.
