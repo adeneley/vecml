@@ -1,0 +1,112 @@
+"""Dataset over the wrecked-pair sample dirs from the degrade pipeline.
+
+Each sample dir (named by SVG sha) holds, per the pipeline contract:
+  clean.png       shared clean reference render (the target)
+  wrecked_XX.png  degraded model inputs (one per variant)
+  labels.png      answer-key indices (unused here; this dataset is RGB->RGB)
+  meta.json       recipe/qc metadata
+
+An item is (wrecked_rgb, clean_rgb), both float32 CHW in [0, 1].
+
+Overfit mode (the default here) is deterministic: the first N dirs sorted by
+name, one fixed variant each, no augmentation. Dirs flagged in
+_audit_summary.json (e.g. blank renders) are skipped.
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import numpy as np
+import torch
+from PIL import Image
+from torch.utils.data import Dataset
+
+
+def _flagged_names(root: Path) -> set[str]:
+    """Sample-dir names flagged in the audit summary, if the summary exists."""
+    summary = root / "_audit_summary.json"
+    if not summary.exists():
+        return set()
+    data = json.loads(summary.read_text())
+    return set(data.get("flagged_names", []))
+
+
+def _is_sample_dir(p: Path) -> bool:
+    """A usable sample dir has a clean render and at least one wrecked variant."""
+    if not p.is_dir():
+        return False
+    return (p / "clean.png").exists() and any(p.glob("wrecked_*.png"))
+
+
+def list_sample_dirs(root: str | Path, skip_flagged: bool = True) -> list[Path]:
+    """Sorted-by-name sample dirs under root, flagged ones optionally removed."""
+    root = Path(root)
+    flagged = _flagged_names(root) if skip_flagged else set()
+    dirs = [
+        p
+        for p in sorted(root.iterdir())
+        if not p.name.startswith("_") and _is_sample_dir(p) and p.name not in flagged
+    ]
+    return dirs
+
+
+def _load_rgb(path: Path, size: int | None) -> torch.Tensor:
+    """Load a PNG as float32 CHW tensor in [0, 1], optionally resized square."""
+    img = Image.open(path).convert("RGB")
+    if size is not None and img.size != (size, size):
+        img = img.resize((size, size), Image.BILINEAR)
+    arr = np.asarray(img, dtype=np.float32) / 255.0
+    return torch.from_numpy(arr).permute(2, 0, 1).contiguous()
+
+
+class PairsDataset(Dataset):
+    """Wrecked -> clean RGB pairs.
+
+    Parameters
+    ----------
+    root:
+        Directory of sample dirs (e.g. data/audit-500-v2).
+    n:
+        Cap on number of sample dirs (overfit mode). None = use all.
+    size:
+        Square resize applied to both images. None = leave native.
+    variant:
+        Which wrecked variant index to use per dir (deterministic).
+    skip_flagged:
+        Drop dirs listed in _audit_summary.json flagged_names.
+    """
+
+    def __init__(
+        self,
+        root: str | Path,
+        n: int | None = None,
+        size: int | None = 256,
+        variant: int = 0,
+        skip_flagged: bool = True,
+    ):
+        self.root = Path(root)
+        self.size = size
+        self.variant = variant
+        dirs = list_sample_dirs(self.root, skip_flagged=skip_flagged)
+        if n is not None:
+            dirs = dirs[:n]
+        if not dirs:
+            raise ValueError(f"no usable sample dirs under {self.root}")
+        self.dirs = dirs
+
+    def _wrecked_path(self, d: Path) -> Path:
+        """The chosen wrecked variant, clamped to what the dir actually has."""
+        variants = sorted(d.glob("wrecked_*.png"))
+        idx = min(self.variant, len(variants) - 1)
+        return variants[idx]
+
+    def __len__(self) -> int:
+        return len(self.dirs)
+
+    def __getitem__(self, i: int) -> tuple[torch.Tensor, torch.Tensor]:
+        d = self.dirs[i]
+        wrecked = _load_rgb(self._wrecked_path(d), self.size)
+        clean = _load_rgb(d / "clean.png", self.size)
+        return wrecked, clean

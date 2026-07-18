@@ -6,9 +6,9 @@
 <title>vecml cockpit</title>
 <style>
   :root {
-    --bg: #0e1116; --panel: #171b22; --panel2: #1e2430; --line: #2a3140;
-    --fg: #e6e9ef; --muted: #8b94a5; --accent: #4f9dff; --good: #3fb950;
-    --bad: #f85149; --warn: #d29922;
+    --bg: #f4f6f9; --panel: #ffffff; --panel2: #eaeef4; --line: #d5dbe4;
+    --fg: #1c2128; --muted: #5b6575; --accent: #1f6fb2; --good: #1a7f37;
+    --bad: #cf222e; --warn: #9a6700;
   }
   * { box-sizing: border-box; }
   body {
@@ -63,9 +63,9 @@
   .cap { text-align: center; color: var(--muted); font-size: 12px; margin-top: 8px; }
   .console { grid-column: 1 / -1; }
   #log {
-    height: 200px; overflow-y: auto; background: #0a0d12; border-radius: 6px;
+    height: 200px; overflow-y: auto; background: #eaeef4; border-radius: 6px;
     padding: 10px 12px; font: 12px/1.5 ui-monospace, "SF Mono", Menlo, monospace;
-    white-space: pre-wrap; color: #cbd3e1;
+    white-space: pre-wrap; color: #333c48;
   }
   #log .err { color: var(--bad); }
   #log .ok { color: var(--good); }
@@ -159,7 +159,7 @@
     const sx = (s) => pad + (w - pad - 8) * (s - s0) / Math.max(s1 - s0, 1);
     const sy = (v) => 8 + (h - pad - 8) * (1 - (v - lo) / (hi - lo));
     // gridlines + y labels
-    ctx.strokeStyle = "#2a3140"; ctx.fillStyle = "#8b94a5"; ctx.font = "11px system-ui";
+    ctx.strokeStyle = "#d5dbe4"; ctx.fillStyle = "#5b6575"; ctx.font = "11px system-ui";
     ctx.lineWidth = 1;
     for (let i = 0; i <= 4; i++) {
       const v = lo + (hi - lo) * i / 4, y = sy(v);
@@ -167,7 +167,7 @@
       ctx.fillText(v.toFixed(4), 2, y + 3);
     }
     // polyline
-    ctx.strokeStyle = "#4f9dff"; ctx.lineWidth = 2; ctx.beginPath();
+    ctx.strokeStyle = "#1f6fb2"; ctx.lineWidth = 2; ctx.beginPath();
     losses.forEach((p, i) => {
       const x = sx(p.step), y = sy(p.loss);
       if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
