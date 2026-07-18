@@ -35,9 +35,9 @@ ENV DEBIAN_FRONTEND=noninteractive \
 # git for repo pull at start; build-essential for any wheels that need it;
 # libgl/libglib for opencv-python-headless runtime.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        git ca-certificates build-essential libgl1 libglib2.0-0 \
+        curl git ca-certificates build-essential libgl1 libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
-# uv, pinned via the official installer.
+# uv, via the official installer.
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 WORKDIR /app
 # Warm the dependency layer: copy only the manifests so this layer is cached
@@ -62,7 +62,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     UV_PROJECT_ENVIRONMENT=/opt/venv \
     PATH=/opt/venv/bin:/root/.local/bin:$PATH
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        git ca-certificates libgl1 libglib2.0-0 \
+        curl git ca-certificates libgl1 libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 WORKDIR /app
