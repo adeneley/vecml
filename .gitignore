@@ -1,0 +1,10 @@
+data/
+checkpoints/
+runs/
+*.pt
+*.ckpt
+__pycache__/
+*.pyc
+.venv/
+.DS_Store
+uv.lock
