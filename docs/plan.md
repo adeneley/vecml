@@ -20,10 +20,15 @@ the hard part. That decision is what we train.
 ## Phases
 
 ### Phase 0: foundations (Mac, ~free)
-- [ ] Wrecking pipeline v1: render clean SVGs, apply degradation ladder
+- [x] Wrecking pipeline v1: render clean SVGs, apply degradation ladder
       (JPEG quality, rescale, blur, noise, dither), emit (input, label-map)
-      pairs. Pure CPU, runs anywhere.
+      pairs. Pure CPU, runs anywhere. (Built 18 Jul 2026: vecml/degrade,
+      scripts/wreck.py, 12 tests. Verified on the 5 seed SVGs in
+      assets/seed/. Known v1 caveat: palette merge can fold close shades
+      together, tune thresholds on real corpus art.)
 - [ ] Corpus v0: a few thousand CC0 SVGs (Openclipart first), rendered.
+      (Aden is designing the collection strategy; 5 CC0 seeds are in
+      assets/seed/ meanwhile.)
 - [ ] NAS pair survey (read-only): count job folders holding both a junk
       raster and a production vector; sample ~50 for quality. Decides how
       much real validation data exists.

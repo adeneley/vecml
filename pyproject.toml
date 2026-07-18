@@ -12,6 +12,7 @@ dependencies = [
     "webdataset",
     "pyyaml",
     "tqdm",
+    "resvg-py>=0.3.3",
 ]
 
 [project.optional-dependencies]
