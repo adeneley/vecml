@@ -29,6 +29,8 @@ def main() -> None:
     ap.add_argument("--batch", type=int, default=8, help="batch size")
     ap.add_argument("--epochs", type=int, default=400, help="max epochs")
     ap.add_argument("--port", type=int, default=7300)
+    ap.add_argument("--host", default="127.0.0.1",
+                    help="bind address (0.0.0.0 for remote pods behind a proxy)")
     ap.add_argument("--no-open", action="store_true", help="do not open a browser")
     args = ap.parse_args()
 
@@ -56,7 +58,7 @@ def main() -> None:
                 webbrowser.open(url)
         threading.Thread(target=_open, daemon=True).start()
 
-    uvicorn.run(app, host="127.0.0.1", port=args.port, log_level="warning")
+    uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
 
 
 if __name__ == "__main__":

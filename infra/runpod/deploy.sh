@@ -45,6 +45,12 @@ API="https://rest.runpod.io/v1"
 
 usage() { grep '^# ' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
 
+# Default image tracks the mode unless the caller overrides.
+default_image() {
+  if [ "${MODE}" = "gpu" ]; then echo "ghcr.io/adeneley/vecml-gpu:latest";
+  else echo "ghcr.io/adeneley/vecml-cpu:latest"; fi
+}
+
 while [ $# -gt 0 ]; do
   case "$1" in
     --gpu)     MODE="gpu"; GPU="$2"; shift 2;;
@@ -62,6 +68,7 @@ while [ $# -gt 0 ]; do
 done
 
 # ---- derive spec + cost ----------------------------------------------------
+IMAGE="${IMAGE:-$(default_image)}"
 HOURS=$(awk "BEGIN{printf \"%.4f\", ${MINUTES}/60}")
 if [ "${MODE}" = "gpu" ]; then
   RATE=$(gpu_rate "${GPU}") || { echo "unknown --gpu '${GPU}'. one of: RTX5090 A5000 A100 H100NVL" >&2; exit 1; }
@@ -110,8 +117,9 @@ read -r -d '' BODY <<JSON || true
   "interruptible": ${SPOT},
   "containerDiskInGb": ${CONTAINER_DISK_GB},
   "networkVolumeId": "${RUNPOD_VOLUME_ID:-}",
-  "ports": ["8000/http", "22/tcp"],
+  "ports": ["8000/http", "7300/http", "22/tcp"],
   "env": {
+    "REPO_URL": "https://github.com/adeneley/vecml.git",
     "REPO_REF": "${REPO_REF}",
     "JOB_CMD": "${JOB_CMD}",
     "VOL_ROOT": "${VOL_ROOT}"
