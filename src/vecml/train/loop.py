@@ -36,7 +36,9 @@ EventSink = Callable[[dict], None]
 
 
 def pick_device() -> str:
-    """mps if available, else cpu. (No CUDA on the Mac dev box.)"""
+    """cuda -> mps -> cpu."""
+    if torch.cuda.is_available():
+        return "cuda"
     if torch.backends.mps.is_available():
         return "mps"
     return "cpu"
