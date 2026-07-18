@@ -28,6 +28,8 @@ def main() -> None:
     ap.add_argument("--variant", type=int, default=0, help="wrecked variant index")
     ap.add_argument("--batch", type=int, default=8, help="batch size")
     ap.add_argument("--epochs", type=int, default=400, help="max epochs")
+    ap.add_argument("--val", type=int, default=0,
+                    help="hold out the last N pairs for per-epoch validation")
     ap.add_argument("--port", type=int, default=7300)
     ap.add_argument("--host", default="127.0.0.1",
                     help="bind address (0.0.0.0 for remote pods behind a proxy)")
@@ -46,6 +48,7 @@ def main() -> None:
         "batch_size": args.batch,
         "max_epochs": args.epochs,
         "ckpt_dir": f"runs/overfit{args.n}",
+        "val_n": args.val,
     }
     app = create_app(defaults, readonly=args.readonly, autostart=args.autostart)
 

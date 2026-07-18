@@ -427,6 +427,10 @@
         if (p.epoch_mean < dlo) dlo = p.epoch_mean;
         if (p.epoch_mean > dhi) dhi = p.epoch_mean;
       }
+      if (p.val_mean != null) {
+        if (p.val_mean < dlo) dlo = p.val_mean;
+        if (p.val_mean > dhi) dhi = p.val_mean;
+      }
     }
     let vlo = Math.min(dlo, TARGET), vhi = dhi;
 
@@ -512,6 +516,15 @@
       ctx.stroke();
     }
 
+    // held-out validation series (the generalisation story; always shown)
+    const vPts = decimate(losses.filter((p) => p.val_mean != null), 2000);
+    if (vPts.length >= 2) {
+      ctx.strokeStyle = "#9a6700"; ctx.lineWidth = 2;
+      ctx.beginPath();
+      vPts.forEach((p, i) => { const x = sx(p.step), y = sy(p.val_mean); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+      ctx.stroke();
+    }
+
     // best-loss marker
     if (isFinite(best)) {
       let bi = 0; for (let i = 1; i < losses.length; i++) if (losses[i].loss < losses[bi].loss) bi = i;
@@ -536,6 +549,7 @@
       const lines = ["step " + p.step, "loss " + fmtNum(p.loss),
         "epoch " + (p.epoch == null ? "-" : p.epoch)];
       if (p.epoch_mean != null) lines.push("epoch mean " + fmtNum(p.epoch_mean));
+      if (p.val_mean != null) lines.push("val mean " + fmtNum(p.val_mean));
       if (p.lr != null) lines.push("lr " + p.lr.toExponential(2));
       ctx.font = "11px ui-monospace, Menlo, monospace";
       let tw = 0; for (const t of lines) tw = Math.max(tw, ctx.measureText(t).width);
@@ -622,7 +636,7 @@
         if (!smoothTimer) $("s_elapsed").textContent = fmt(ev.elapsed_s, 1) + "s";
       }
       losses.push({ step: ev.step, loss: ev.loss, epoch: ev.epoch,
-        epoch_mean: ev.epoch_mean, lr: ev.lr });
+        epoch_mean: ev.epoch_mean, val_mean: ev.val_mean, lr: ev.lr });
       draw();
     } else if (ev.type === "sample") {
       lastSampleEv = ev;

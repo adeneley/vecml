@@ -76,6 +76,9 @@ class TrainConfig:
     num_workers: int = 0
     ckpt_dir: str = "runs/overfit100"
     seed: int = 0
+    # Held-out validation: the LAST val_n of the selected dirs never train;
+    # a val pass runs each epoch and val_mean rides the epoch_end metric.
+    val_n: int = 0
     extra: dict = field(default_factory=dict)
 
 
@@ -131,8 +134,17 @@ class Trainer:
         dataset = PairsDataset(
             cfg.data_root, n=cfg.n, size=cfg.size, variant=cfg.variant
         )
+        val_n = min(cfg.val_n, max(len(dataset) - 1, 0))
+        if val_n > 0:
+            from torch.utils.data import Subset
+
+            train_set = Subset(dataset, range(len(dataset) - val_n))
+            val_set = Subset(dataset, range(len(dataset) - val_n, len(dataset)))
+            val_loader = DataLoader(val_set, batch_size=32, shuffle=False)
+        else:
+            train_set, val_set, val_loader = dataset, None, None
         loader = DataLoader(
-            dataset,
+            train_set,
             batch_size=cfg.batch_size,
             shuffle=True,
             num_workers=cfg.num_workers,
@@ -149,11 +161,12 @@ class Trainer:
         )
         loss_fn = nn.L1Loss()
 
-        # Fixed validation items (evenly spaced across the set) for the live
-        # sample views. Kept on CPU and moved per-sample with plain .to(device).
-        n_val = min(4, len(dataset))
-        idxs = sorted({round(i * (len(dataset) - 1) / max(n_val - 1, 1)) for i in range(n_val)})
-        val_items = [dataset[i] for i in idxs]
+        # Fixed items for the live sample views: drawn from the held-out split
+        # when one exists (so the 4-up shows images the model never trains on).
+        pool = val_set if val_set is not None else dataset
+        n_show = min(4, len(pool))
+        idxs = sorted({round(i * (len(pool) - 1) / max(n_show - 1, 1)) for i in range(n_show)})
+        val_items = [pool[i] for i in idxs]
 
         ckpt_dir = Path(cfg.ckpt_dir)
         ckpt_dir.mkdir(parents=True, exist_ok=True)
@@ -235,6 +248,19 @@ class Trainer:
                 break
 
             epoch_mean = epoch_loss_sum / max(epoch_items, 1)
+            val_mean = None
+            if val_loader is not None:
+                model.eval()
+                v_sum, v_items = 0.0, 0
+                with torch.no_grad():
+                    for vx, vy in val_loader:
+                        vx = vx.to(self.device)  # plain transfer
+                        vy = vy.to(self.device)
+                        v_loss = loss_fn(model(vx), vy)
+                        v_sum += float(v_loss.item()) * vx.shape[0]
+                        v_items += vx.shape[0]
+                model.train()
+                val_mean = v_sum / max(v_items, 1)
             # Final per-epoch mean point (the exit-criterion line on the chart).
             self._emit(
                 {
@@ -243,6 +269,7 @@ class Trainer:
                     "epoch": epoch,
                     "loss": loss_val,
                     "epoch_mean": epoch_mean,
+                    "val_mean": val_mean,
                     "epoch_end": True,
                     "lr": optim.param_groups[0]["lr"],
                     "elapsed_s": time.perf_counter() - start,
