@@ -17,8 +17,12 @@ Every pixel is then labelled by nearest palette colour.
 Known caveat (v1): anti-aliased edge pixels blend two region colours, so
 nearest-colour assignment puts them on whichever side is closer. Labels are
 therefore near-perfect in region interiors but carry roughly one pixel of
-ambiguity along edges. v2 may render an explicit region-ID map from the SVG
-instead of inferring it from pixels.
+ambiguity along edges.
+
+This is now the FALLBACK path. When an SVG source exists, idmap.derive_labels_
+from_svg recovers the palette from geometry instead of guessing from pixels,
+which fixes the pale-art failure this heuristic has (near-white flats read as
+background). Keep this only for inputs with no SVG source (raster-only pairs).
 """
 
 import numpy as np
@@ -88,7 +92,7 @@ def _is_blend(colour, anchors):
     return False
 
 
-def derive_labels(clean_rgb: np.ndarray):
+def derive_labels_from_pixels(clean_rgb: np.ndarray):
     """Return (label_map, palette).
 
     label_map: uint8 (or uint16 if the palette is large) array, HxW, where each
@@ -136,3 +140,7 @@ def derive_labels(clean_rgb: np.ndarray):
     label_map = labels.reshape(h, w)
     dtype = np.uint8 if len(palette) <= 255 else np.uint16
     return label_map.astype(dtype), palette.astype(np.uint8)
+
+
+# Back-compat alias for the original name.
+derive_labels = derive_labels_from_pixels

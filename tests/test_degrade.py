@@ -5,7 +5,7 @@ import json
 import numpy as np
 import pytest
 
-from vecml.degrade.labels import derive_labels
+from vecml.degrade.labels import derive_labels_from_pixels
 from vecml.degrade.pipeline import wreck_svg
 from vecml.degrade.renderer import render_svg, render_svg_rgba
 from vecml.degrade.wreck import OPS, apply_recipe, sample_recipe
@@ -41,7 +41,7 @@ def test_render_shape_and_dtype(svg_file):
 
 def test_derive_labels_palette_and_background(svg_file):
     rgb = render_svg(svg_file, SIZE)
-    label_map, palette = derive_labels(rgb)
+    label_map, palette = derive_labels_from_pixels(rgb)
 
     assert label_map.shape == (SIZE, SIZE)
     # bg white + 3 flats == 4 palette entries (allow one of slack for AA blends).

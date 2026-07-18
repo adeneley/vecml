@@ -4,11 +4,14 @@ For each variant we write, under out_dir:
   clean.png         the reference clean render (shared by all variants)
   wrecked_XX.png    the degraded model input for variant XX
   labels.png        single-channel answer key (shared: derived once from clean)
+  labels_view.png   colourised preview of the answer key (palette applied)
   palette.json      palette RGB rows, index 0 = background
-  meta.json         recipe (ops + severities), seed, source svg, size, backend
+  meta.json         recipe, seed, source svg, size, backend, label method, qc
 
-The label map is derived ONCE from the clean render. It is the ground truth and
-never changes: only the wrecked input varies across variants.
+The label map is derived ONCE from the SVG geometry (the idmap path) and is the
+ground truth: only the wrecked input varies across variants. If geometry
+derivation is impossible (no SVG, a CSS block, a gradient paint), we fall back to
+the old pixel-based derivation and record which path produced the labels.
 """
 
 import json
@@ -17,9 +20,25 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
-from .labels import derive_labels
+from .audit import audit_sample
+from .idmap import DerivationError, derive_labels_from_svg
+from .labels import derive_labels_from_pixels
 from .renderer import backend_name, render_svg
 from .wreck import apply_recipe, sample_recipe
+
+
+def _derive_ground_truth(svg_path, clean, size):
+    """Return (label_map, palette, n_declared, method).
+
+    Prefer geometry-derived labels; fall back to pixel derivation if the SVG
+    cannot be turned into a clean answer key.
+    """
+    try:
+        label_map, palette, n_declared = derive_labels_from_svg(svg_path, size)
+        return label_map, palette, n_declared, "idmap"
+    except DerivationError:
+        label_map, palette = derive_labels_from_pixels(clean)
+        return label_map, palette, None, "pixels_fallback"
 
 
 def wreck_svg(
@@ -39,13 +58,17 @@ def wreck_svg(
     out_dir.mkdir(parents=True, exist_ok=True)
 
     clean = render_svg(svg_path, size)
-    label_map, palette = derive_labels(clean)
+    label_map, palette, n_declared, method = _derive_ground_truth(svg_path, clean, size)
+
+    qc = audit_sample(clean, label_map, palette, n_declared)
 
     # Write the shared, variant-independent artefacts.
     Image.fromarray(clean, mode="RGB").save(out_dir / "clean.png")
     # labels.png stores raw label indices (0..N-1), not a colourised preview.
     label_mode = "L" if label_map.dtype == np.uint8 else "I;16"
     Image.fromarray(label_map, mode=label_mode).save(out_dir / "labels.png")
+    # labels_view.png is the palette applied back to the indices, for eyeballing.
+    Image.fromarray(palette[label_map], mode="RGB").save(out_dir / "labels_view.png")
 
     with open(out_dir / "palette.json", "w") as f:
         json.dump(
@@ -84,6 +107,9 @@ def wreck_svg(
         "n_variants": n_variants,
         "backend": backend_name(),
         "n_palette": int(len(palette)),
+        "n_declared": n_declared,
+        "label_method": method,
+        "qc": qc,
         "variants": variants,
     }
     with open(out_dir / "meta.json", "w") as f:
@@ -95,4 +121,6 @@ def wreck_svg(
         "n_variants": n_variants,
         "n_palette": int(len(palette)),
         "size": size,
+        "label_method": method,
+        "flags": qc["flags"],
     }
