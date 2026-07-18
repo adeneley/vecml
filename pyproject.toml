@@ -22,6 +22,17 @@ dependencies = [
 dev = ["pytest", "ruff"]
 baselines = ["vtracer"]
 
+# RunPod hosts run CUDA 12.8 drivers; PyPI's newest torch is a cu130 build that
+# refuses them. Pin Linux to the cu128 index (macOS keeps PyPI torch via MPS).
+[tool.uv.sources]
+torch = [{ index = "pytorch-cu128", marker = "sys_platform == 'linux'" }]
+torchvision = [{ index = "pytorch-cu128", marker = "sys_platform == 'linux'" }]
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
