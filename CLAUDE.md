@@ -54,9 +54,15 @@ Small by modern standards; VRAM is never the constraint, iteration speed is.
 Resolutions: 128px sanity, 256px prototype, 512px serious, 1024px final
 fine-tune only after the design is frozen at 512px.
 
-## GPU strategy (analysed 18 Jul 2026, prices USD, provider list in docs/)
+## GPU options (analysed 18 Jul 2026, prices USD, provider list in docs/)
 
-- **Default: RTX 5090 @ $0.99/hr.** Best $/work (~$2.06 per H200-hour-equiv).
+**STATUS: these are costed IDEAS from the analysis, not decisions. Aden has
+not committed to any rental, tier, or budget. NOTHING here authorizes
+spending money. Every GPU rental, of any size, requires Aden's explicit
+go-ahead at the point of usage: name the card, hours, and expected cost,
+and wait for his yes before renting.**
+
+- **Default candidate: RTX 5090 @ $0.99/hr.** Best $/work (~$2.06 per H200-hour-equiv).
   Prototype run (256px, 200k imgs) = overnight, $10-21. Use 2-3 per pod for
   parallel independent experiments, NOT DDP, during exploration.
 - **Sanity tier: RTX A5000/A4500 @ ~$0.26/hr.** Cheapest work on the list.
@@ -64,7 +70,8 @@ fine-tune only after the design is frozen at 512px.
 - **Finals only: 2x H100 NVL DDP @ $3.19/ea**, ~1 week per 1024px run.
 - **Traps: H100 PCIe (worst value), B200/B300/H200 for prototyping, the
   48-96GB VRAM-tax tier (L40/L40S/6000 Ada), starved multi-GPU pods.**
-- Budget: LEAN ~$1,300 / ~3 months; BALANCED ~$2,700 / ~2-2.5 months.
+- Budget scenarios (illustrative only, not approved): LEAN ~$1,300 /
+  ~3 months; BALANCED ~$2,700 / ~2-2.5 months.
   Spot pricing (if offered) beats the patience play: checkpoint every
   15-30 min and take 40-60% off.
 - **Pre-shard the dataset before renting.** Wreck images offline into
