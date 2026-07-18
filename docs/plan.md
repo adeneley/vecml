@@ -57,6 +57,26 @@ the hard part. That decision is what we train.
 - [ ] Wire into the Rust engine as the optional neural front-end and A/B it
       in the gallery against flat_quant on the full regression set.
 
+## Open design notes (decide before Phase 1)
+
+- **Pale art on white is invisible to the model.** We composite training
+  inputs over white, so near-white art (correctly labelled since idmap-v3)
+  produces an input the model literally cannot see. Options: vary the
+  compositing background during wrecking, or feed the alpha channel as a
+  4th input channel. Training-recipe decision, not a labelling bug.
+- **veval must be upgraded before it judges models** (audited 18 Jul 2026).
+  It scores output against the INPUT image, so on wrecked inputs it would
+  reward reproducing the damage. Needed, in order: (1) a --ref flag to
+  score against the clean original (~half a day), (2) a degraded batch
+  runner + aggregation incl. worst-case/percentile (1-2 days; the wrecking
+  pipeline manufactures the corpus), (3) max/p99 deltaE so local
+  catastrophes can't hide in a whole-canvas mean (hours). Until these land,
+  veval remains the hand-tuning instrument it was built to be; the Phase 1
+  exit test depends on them.
+- **Output head is undecided** (colour regression vs embedding+clustering
+  vs boundary+fill). The overfit cockpit run is the arena; v0 ships with
+  RGB regression purely to prove plumbing.
+
 ## Budget guardrails
 
 - No decision on total budget has been made. The scenarios below are

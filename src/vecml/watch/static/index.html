@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>vecml cockpit</title>
+<style>
+  :root {
+    --bg: #0e1116; --panel: #171b22; --panel2: #1e2430; --line: #2a3140;
+    --fg: #e6e9ef; --muted: #8b94a5; --accent: #4f9dff; --good: #3fb950;
+    --bad: #f85149; --warn: #d29922;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  }
+  header {
+    display: flex; align-items: center; gap: 16px;
+    padding: 14px 20px; border-bottom: 1px solid var(--line); background: var(--panel);
+  }
+  header h1 { font-size: 15px; margin: 0; font-weight: 600; letter-spacing: .3px; }
+  header .spacer { flex: 1; }
+  button#run {
+    font: inherit; font-weight: 600; font-size: 15px; cursor: pointer;
+    padding: 10px 26px; border-radius: 8px; border: none; color: #fff;
+    background: var(--good); transition: background .15s;
+  }
+  button#run.running { background: var(--bad); }
+  button#run:disabled { opacity: .6; cursor: default; }
+  .pill {
+    font-size: 12px; font-weight: 600; padding: 5px 12px; border-radius: 20px;
+    background: var(--panel2); color: var(--muted); border: 1px solid var(--line);
+  }
+  .pill.running { color: var(--accent); border-color: var(--accent); }
+  .pill.finished { color: var(--good); border-color: var(--good); }
+  .pill.error, .pill.stopped { color: var(--bad); border-color: var(--bad); }
+  main { display: grid; grid-template-columns: 1.4fr 1fr; gap: 16px; padding: 16px 20px; }
+  .card {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 14px 16px;
+  }
+  .card h2 {
+    font-size: 12px; text-transform: uppercase; letter-spacing: .6px;
+    color: var(--muted); margin: 0 0 10px;
+  }
+  #chartWrap { grid-column: 1; }
+  canvas#chart { width: 100%; height: 260px; display: block; background: var(--panel2);
+    border-radius: 6px; }
+  .stats { grid-column: 2; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .stat { background: var(--panel2); border-radius: 8px; padding: 10px 12px; }
+  .stat .k { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+  .stat .v { font-size: 20px; font-weight: 600; margin-top: 3px; font-variant-numeric: tabular-nums; }
+  .triptych { grid-column: 1 / -1; }
+  .frames { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+  .frame { text-align: center; }
+  .frame .lbl { font-size: 11px; color: var(--muted); text-transform: uppercase;
+    letter-spacing: .5px; margin-bottom: 6px; }
+  .frame img {
+    width: 100%; max-width: 220px; image-rendering: pixelated;
+    border-radius: 6px; background: var(--panel2); aspect-ratio: 1; object-fit: contain;
+  }
+  .cap { text-align: center; color: var(--muted); font-size: 12px; margin-top: 8px; }
+  .console { grid-column: 1 / -1; }
+  #log {
+    height: 200px; overflow-y: auto; background: #0a0d12; border-radius: 6px;
+    padding: 10px 12px; font: 12px/1.5 ui-monospace, "SF Mono", Menlo, monospace;
+    white-space: pre-wrap; color: #cbd3e1;
+  }
+  #log .err { color: var(--bad); }
+  #log .ok { color: var(--good); }
+  #log .dim { color: var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <h1>vecml cockpit</h1>
+  <span id="pill" class="pill">idle</span>
+  <span class="spacer"></span>
+  <button id="run">Start</button>
+</header>
+
+<main>
+  <div class="card" id="chartWrap">
+    <h2>training loss (L1)</h2>
+    <canvas id="chart"></canvas>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><div class="k">step</div><div class="v" id="s_step">-</div></div>
+    <div class="stat"><div class="k">epoch</div><div class="v" id="s_epoch">-</div></div>
+    <div class="stat"><div class="k">loss now</div><div class="v" id="s_loss">-</div></div>
+    <div class="stat"><div class="k">loss best</div><div class="v" id="s_best">-</div></div>
+    <div class="stat"><div class="k">img / s</div><div class="v" id="s_ips">-</div></div>
+    <div class="stat"><div class="k">elapsed</div><div class="v" id="s_elapsed">-</div></div>
+    <div class="stat"><div class="k">device</div><div class="v" id="s_device">-</div></div>
+    <div class="stat"><div class="k">state</div><div class="v" id="s_state">idle</div></div>
+  </div>
+
+  <div class="card triptych">
+    <h2>live sample &mdash; input | prediction | target</h2>
+    <div class="frames">
+      <div class="frame"><div class="lbl">input (wrecked)</div><img id="f_in" alt=""></div>
+      <div class="frame"><div class="lbl">prediction</div><img id="f_pred" alt=""></div>
+      <div class="frame"><div class="lbl">target (clean)</div><img id="f_tgt" alt=""></div>
+    </div>
+    <div class="cap" id="tri_cap">no sample yet</div>
+  </div>
+
+  <div class="card console">
+    <h2>console</h2>
+    <div id="log"></div>
+  </div>
+</main>
+
+<script>
+(function () {
+  "use strict";
+  const $ = (id) => document.getElementById(id);
+  const runBtn = $("run"), pill = $("pill");
+  let running = false, best = Infinity;
+  const losses = [];  // {step, loss}
+
+  function log(msg, cls) {
+    const el = $("log");
+    const line = document.createElement("div");
+    if (cls) line.className = cls;
+    line.textContent = msg;
+    el.appendChild(line);
+    el.scrollTop = el.scrollHeight;
+  }
+
+  function setState(state, detail) {
+    pill.className = "pill " + state;
+    pill.textContent = state;
+    $("s_state").textContent = state;
+    running = (state === "running");
+    runBtn.textContent = running ? "Stop" : "Start";
+    runBtn.className = running ? "running" : "";
+    runBtn.disabled = false;
+  }
+
+  // --- hand-rolled loss chart ---
+  const cv = $("chart"), ctx = cv.getContext("2d");
+  function sizeCanvas() {
+    const r = cv.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+    cv.width = r.width * dpr; cv.height = r.height * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  window.addEventListener("resize", () => { sizeCanvas(); draw(); });
+
+  function draw() {
+    const w = cv.clientWidth, h = cv.clientHeight, pad = 34;
+    ctx.clearRect(0, 0, w, h);
+    if (losses.length < 2) return;
+    let lo = Infinity, hi = -Infinity, s0 = losses[0].step, s1 = losses[losses.length - 1].step;
+    for (const p of losses) { if (p.loss < lo) lo = p.loss; if (p.loss > hi) hi = p.loss; }
+    if (hi === lo) hi = lo + 1e-6;
+    const sx = (s) => pad + (w - pad - 8) * (s - s0) / Math.max(s1 - s0, 1);
+    const sy = (v) => 8 + (h - pad - 8) * (1 - (v - lo) / (hi - lo));
+    // gridlines + y labels
+    ctx.strokeStyle = "#2a3140"; ctx.fillStyle = "#8b94a5"; ctx.font = "11px system-ui";
+    ctx.lineWidth = 1;
+    for (let i = 0; i <= 4; i++) {
+      const v = lo + (hi - lo) * i / 4, y = sy(v);
+      ctx.beginPath(); ctx.moveTo(pad, y); ctx.lineTo(w - 8, y); ctx.stroke();
+      ctx.fillText(v.toFixed(4), 2, y + 3);
+    }
+    // polyline
+    ctx.strokeStyle = "#4f9dff"; ctx.lineWidth = 2; ctx.beginPath();
+    losses.forEach((p, i) => {
+      const x = sx(p.step), y = sy(p.loss);
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+  }
+
+  function fmt(x, d) { return (x === undefined || x === null) ? "-" : Number(x).toFixed(d); }
+
+  function onEvent(ev) {
+    if (ev.type === "status") {
+      setState(ev.state, ev.detail);
+      if (ev.detail && ev.detail.indexOf("device=") === 0)
+        $("s_device").textContent = ev.detail.slice(7);
+      log("[status] " + ev.state + (ev.detail ? " - " + ev.detail : ""),
+          ev.state === "error" ? "err" : (ev.state === "finished" ? "ok" : "dim"));
+    } else if (ev.type === "metric") {
+      $("s_step").textContent = ev.step;
+      $("s_epoch").textContent = ev.epoch;
+      $("s_loss").textContent = fmt(ev.loss, 4);
+      if (ev.loss < best) { best = ev.loss; $("s_best").textContent = fmt(best, 4); }
+      $("s_ips").textContent = fmt(ev.img_per_s, 1);
+      $("s_elapsed").textContent = fmt(ev.elapsed_s, 1) + "s";
+      losses.push({ step: ev.step, loss: ev.loss });
+      draw();
+    } else if (ev.type === "sample") {
+      $("f_in").src = "data:image/png;base64," + ev.input;
+      $("f_pred").src = "data:image/png;base64," + ev.pred;
+      $("f_tgt").src = "data:image/png;base64," + ev.target;
+      $("tri_cap").textContent = "step " + ev.step;
+    } else if (ev.type === "error") {
+      log("[error] " + ev.message, "err");
+      if (ev.traceback) log(ev.traceback, "err");
+    }
+  }
+
+  // --- SSE ---
+  function connect() {
+    const es = new EventSource("/events");
+    es.onmessage = (e) => { try { onEvent(JSON.parse(e.data)); } catch (_) {} };
+    es.onerror = () => { log("[sse] disconnected, retrying...", "dim"); };
+  }
+
+  runBtn.addEventListener("click", async () => {
+    runBtn.disabled = true;
+    if (running) {
+      await fetch("/stop", { method: "POST" });
+      log("[ui] stop requested", "dim");
+    } else {
+      best = Infinity; losses.length = 0; draw();
+      $("s_best").textContent = "-";
+      const r = await fetch("/start", { method: "POST",
+        headers: { "Content-Type": "application/json" }, body: "{}" });
+      if (r.status === 409) { log("[ui] already running", "dim"); runBtn.disabled = false; }
+      else log("[ui] start requested", "dim");
+    }
+  });
+
+  sizeCanvas();
+  connect();
+})();
+</script>
+</body>
+</html>
