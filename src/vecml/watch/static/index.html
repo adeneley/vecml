@@ -109,6 +109,12 @@
     border-radius: 4px; transition: opacity .25s ease;
   }
   .tile img.flash { animation: frameflash .55s ease-out; }
+  /* 4-up view: 4 samples as columns, prediction row over target row */
+  .frames.multi { grid-template-columns: auto repeat(4, 1fr); gap: 8px; }
+  .frames.multi .rowlbl { font-size: 10px; color: var(--muted); text-transform: uppercase;
+    letter-spacing: .5px; writing-mode: vertical-rl; transform: rotate(180deg);
+    align-self: center; justify-self: center; }
+  .frames.multi .tile { padding: 5%; border-radius: 8px; }
   @keyframes frameflash {
     0% { box-shadow: 0 0 0 0 rgba(31,111,178,.55); }
     100% { box-shadow: 0 0 0 6px rgba(31,111,178,0); }
@@ -174,11 +180,24 @@
 
   <div class="card triptych">
     <div class="card-head">
-      <h2>live sample &mdash; input | prediction | target</h2>
+      <h2 id="tri_title">live sample &mdash; input | prediction | target</h2>
       <span class="grow"></span>
+      <button class="toggle" id="t_multi" title="show 4 validation samples, prediction vs target">4-up</button>
       <span class="cap" id="tri_cap">no sample yet</span>
     </div>
-    <div class="frames">
+    <div class="frames multi" id="frames4" hidden>
+      <div class="rowlbl">prediction</div>
+      <div class="tilewrap"><div class="tile"><div class="ph" id="ph_p0"><span class="pht">awaiting</span></div><img id="m_p0" alt="" hidden></div></div>
+      <div class="tilewrap"><div class="tile"><div class="ph" id="ph_p1"><span class="pht">awaiting</span></div><img id="m_p1" alt="" hidden></div></div>
+      <div class="tilewrap"><div class="tile"><div class="ph" id="ph_p2"><span class="pht">awaiting</span></div><img id="m_p2" alt="" hidden></div></div>
+      <div class="tilewrap"><div class="tile"><div class="ph" id="ph_p3"><span class="pht">awaiting</span></div><img id="m_p3" alt="" hidden></div></div>
+      <div class="rowlbl">target</div>
+      <div class="tilewrap"><div class="tile"><div class="ph" id="ph_t0"><span class="pht">awaiting</span></div><img id="m_t0" alt="" hidden></div></div>
+      <div class="tilewrap"><div class="tile"><div class="ph" id="ph_t1"><span class="pht">awaiting</span></div><img id="m_t1" alt="" hidden></div></div>
+      <div class="tilewrap"><div class="tile"><div class="ph" id="ph_t2"><span class="pht">awaiting</span></div><img id="m_t2" alt="" hidden></div></div>
+      <div class="tilewrap"><div class="tile"><div class="ph" id="ph_t3"><span class="pht">awaiting</span></div><img id="m_t3" alt="" hidden></div></div>
+    </div>
+    <div class="frames" id="frames1">
       <div class="frame">
         <div class="lbl">input (wrecked)</div>
         <div class="tilewrap"><div class="tile">
@@ -252,6 +271,8 @@
   let logY = localStorage.getItem("vecml_logy") === "1";
   let ema = localStorage.getItem("vecml_ema") !== "0"; // default on
   let showEm = localStorage.getItem("vecml_em") === "1"; // default off
+  let multi = localStorage.getItem("vecml_multi") === "1"; // 4-up sample view
+  let lastSampleEv = null;
   let hoverX = null;
 
   function pad2(n) { return (n < 10 ? "0" : "") + n; }
@@ -509,6 +530,35 @@
 
   function fmt(x, d) { return (x === undefined || x === null) ? "-" : Number(x).toFixed(d); }
 
+  function syncSampleView() {
+    $("frames1").hidden = multi;
+    $("frames4").hidden = !multi;
+    $("tri_title").innerHTML = multi
+      ? "live samples &mdash; prediction vs target"
+      : "live sample &mdash; input | prediction | target";
+  }
+
+  function renderSample() {
+    const ev = lastSampleEv;
+    if (!ev) return;
+    if (multi) {
+      const items = ev.items || [];
+      if (!items.length) {
+        $("tri_cap").textContent = "4-up needs a freshly started run";
+        return;
+      }
+      items.slice(0, 4).forEach((it, i) => {
+        showSample("m_p" + i, "ph_p" + i, it.pred);
+        showSample("m_t" + i, "ph_t" + i, it.target);
+      });
+    } else {
+      showSample("f_in", "ph_in", ev.input);
+      showSample("f_pred", "ph_pred", ev.pred);
+      showSample("f_tgt", "ph_tgt", ev.target);
+    }
+    $("tri_cap").textContent = "step " + ev.step;
+  }
+
   function showSample(imgId, phId, b64) {
     const img = $(imgId), ph = $(phId);
     if (ph) ph.style.display = "none";
@@ -551,10 +601,8 @@
         epoch_mean: ev.epoch_mean, lr: ev.lr });
       draw();
     } else if (ev.type === "sample") {
-      showSample("f_in", "ph_in", ev.input);
-      showSample("f_pred", "ph_pred", ev.pred);
-      showSample("f_tgt", "ph_tgt", ev.target);
-      $("tri_cap").textContent = "step " + ev.step;
+      lastSampleEv = ev;
+      renderSample();
     } else if (ev.type === "error") {
       log("[error] " + ev.message, "err");
       if (ev.traceback) log(ev.traceback, "err");
@@ -566,6 +614,7 @@
     $("t_log").classList.toggle("on", logY);
     $("t_ema").classList.toggle("on", ema);
     $("t_em").classList.toggle("on", showEm);
+    $("t_multi").classList.toggle("on", multi);
   }
   $("t_log").addEventListener("click", () => {
     logY = !logY; localStorage.setItem("vecml_logy", logY ? "1" : "0"); syncToggles(); draw();
@@ -576,8 +625,13 @@
   $("t_em").addEventListener("click", () => {
     showEm = !showEm; localStorage.setItem("vecml_em", showEm ? "1" : "0"); syncToggles(); draw();
   });
+  $("t_multi").addEventListener("click", () => {
+    multi = !multi; localStorage.setItem("vecml_multi", multi ? "1" : "0");
+    syncToggles(); syncSampleView(); renderSample();
+  });
   $("t_clear").addEventListener("click", () => { $("log").innerHTML = ""; });
   syncToggles();
+  syncSampleView();
 
   // --- SSE ---
   function connect() {

@@ -147,9 +147,11 @@ class Trainer:
         )
         loss_fn = nn.L1Loss()
 
-        # Fixed validation item (index 0) for the live triptych. Kept on CPU
-        # and moved per-sample with a plain .to(device).
-        val_x, val_y = dataset[0]
+        # Fixed validation items (evenly spaced across the set) for the live
+        # sample views. Kept on CPU and moved per-sample with plain .to(device).
+        n_val = min(4, len(dataset))
+        idxs = sorted({round(i * (len(dataset) - 1) / max(n_val - 1, 1)) for i in range(n_val)})
+        val_items = [dataset[i] for i in idxs]
 
         ckpt_dir = Path(cfg.ckpt_dir)
         ckpt_dir.mkdir(parents=True, exist_ok=True)
@@ -224,7 +226,7 @@ class Trainer:
                     last_metric_t = now
 
                 if first or (now - last_sample_t) >= cfg.sample_interval_s:
-                    self._emit_sample(model, val_x, val_y, global_step)
+                    self._emit_sample(model, val_items, global_step)
                     last_sample_t = now
 
             if stopped:
@@ -271,25 +273,29 @@ class Trainer:
     def _emit_sample(
         self,
         model: nn.Module,
-        val_x: torch.Tensor,
-        val_y: torch.Tensor,
+        val_items: list[tuple[torch.Tensor, torch.Tensor]],
         step: int,
     ) -> None:
-        """Run the fixed val item and emit an input|pred|target triptych."""
+        """Run the fixed val items (one batched forward) and emit thumbnails.
+
+        Event stays additive: input/pred/target are item 0 (the original
+        single-triptych contract); `items` carries every val item for the
+        multi-sample view.
+        """
         was_training = model.training
         model.eval()
         with torch.no_grad():
-            x = val_x.unsqueeze(0).to(self.device)  # plain transfer
-            pred = model(x)[0].to("cpu")  # plain transfer back
+            xs = torch.stack([x for x, _ in val_items]).to(self.device)  # plain transfer
+            preds = model(xs).to("cpu")  # plain transfer back
         if was_training:
             model.train()
         size = self.cfg.sample_size
-        self._emit(
+        items = [
             {
-                "type": "sample",
-                "step": step,
-                "input": _tensor_to_b64_png(val_x, size),
-                "pred": _tensor_to_b64_png(pred, size),
-                "target": _tensor_to_b64_png(val_y, size),
+                "input": _tensor_to_b64_png(x, size),
+                "pred": _tensor_to_b64_png(preds[i], size),
+                "target": _tensor_to_b64_png(y, size),
             }
-        )
+            for i, (x, y) in enumerate(val_items)
+        ]
+        self._emit({"type": "sample", "step": step, **items[0], "items": items})
