@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>How the model works, from first principles</title>
+<style>
+:root{
+  --surface:#f7f8fa;
+  --surface-alt:#eef1f5;
+  --ink:#1c2128;
+  --ink-soft:#4a5361;
+  --line:#d7dce3;
+  --line-strong:#aeb6c2;
+  --accent:#1f6fb2;
+  --accent-ink:#175a92;
+  --accent-tint:#e3eef8;
+  --specimen:#73c0fb;
+  --specimen-deep:#3f8fd4;
+  --good:#2c7a4b;
+  --code-bg:#eceff3;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --surface:#14171c;
+    --surface-alt:#1c2129;
+    --ink:#e8ebef;
+    --ink-soft:#a3adba;
+    --line:#2b323c;
+    --line-strong:#465060;
+    --accent:#6db3e8;
+    --accent-ink:#8cc4ef;
+    --accent-tint:#1b2836;
+    --specimen:#4d9bd9;
+    --specimen-deep:#77b8e8;
+    --good:#5cb884;
+    --code-bg:#1f242c;
+  }
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{
+  margin:0;
+  background:var(--surface);
+  color:var(--ink);
+  font:18px/1.62 "Avenir Next","Segoe UI","Helvetica Neue",system-ui,sans-serif;
+  -webkit-font-smoothing:antialiased;
+}
+main{max-width:760px;margin:0 auto;padding:0 22px 90px}
+p,ul,ol{max-width:70ch}
+code,.shape{
+  font-family:ui-monospace,"SF Mono",Menlo,monospace;
+  font-size:0.86em;
+  background:var(--code-bg);
+  padding:1px 6px;
+  border-radius:5px;
+}
+a{color:var(--accent-ink)}
+
+/* Masthead: specimen card */
+header.mast{
+  display:grid;
+  grid-template-columns:1fr 190px;
+  gap:26px;
+  align-items:end;
+  padding:54px 0 26px;
+  border-bottom:2px solid var(--ink);
+  margin-bottom:8px;
+}
+.mast h1{
+  font-size:clamp(30px,5.4vw,42px);
+  line-height:1.08;
+  margin:0 0 14px;
+  font-weight:700;
+  letter-spacing:-0.015em;
+}
+.mast .standfirst{
+  font-size:19px;
+  line-height:1.5;
+  color:var(--ink-soft);
+  margin:0 0 18px;
+  max-width:56ch;
+}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{
+  font:600 12.5px/1 "Avenir Next","Segoe UI",sans-serif;
+  border:1px solid var(--line-strong);
+  border-radius:99px;
+  padding:6px 12px;
+  color:var(--ink-soft);
+}
+.specimen-card{
+  border:1px solid var(--line-strong);
+  border-radius:10px;
+  background:var(--surface-alt);
+  padding:12px 12px 9px;
+  text-align:center;
+}
+.specimen-card svg{width:100%;height:auto;display:block}
+.specimen-card figcaption{
+  font:11.5px/1.4 ui-monospace,"SF Mono",Menlo,monospace;
+  color:var(--ink-soft);
+  margin-top:8px;
+}
+
+/* Stage headings: mono ordinal + rule, order is the real data path */
+h2{
+  font-size:24px;
+  font-weight:700;
+  letter-spacing:-0.01em;
+  margin:64px 0 14px;
+  padding-top:20px;
+  border-top:1px solid var(--line);
+}
+h2 .ord{
+  font:600 14px ui-monospace,"SF Mono",Menlo,monospace;
+  color:var(--accent-ink);
+  display:block;
+  margin-bottom:6px;
+}
+h3{font-size:18.5px;margin:34px 0 8px}
+
+.figure{
+  background:var(--surface-alt);
+  border:1px solid var(--line);
+  border-radius:12px;
+  padding:22px 18px 14px;
+  margin:30px 0;
+}
+.figure svg{width:100%;height:auto;display:block}
+.figure figcaption{
+  font-size:14.5px;
+  color:var(--ink-soft);
+  margin-top:12px;
+  line-height:1.5;
+}
+.nodebox{fill:var(--surface);stroke:var(--line-strong)}
+.ntext{fill:var(--ink);font:600 13px "Avenir Next","Segoe UI",sans-serif}
+.mtext{fill:var(--ink);font:600 12px ui-monospace,"SF Mono",Menlo,monospace}
+.ltext{fill:var(--ink-soft);font:11.5px "Avenir Next","Segoe UI",sans-serif}
+.edge{stroke:var(--ink-soft);stroke-width:1.6;fill:none}
+.skip{stroke:var(--accent);stroke-width:1.6;fill:none;stroke-dasharray:5 4}
+
+.lead-box{
+  border:1.5px solid var(--ink);
+  border-radius:10px;
+  padding:18px 22px;
+  margin:28px 0 8px;
+  font-size:19px;
+  line-height:1.55;
+}
+.lead-box .tag{
+  font:700 12px/1 "Avenir Next","Segoe UI",sans-serif;
+  text-transform:uppercase;
+  letter-spacing:0.08em;
+  color:var(--accent-ink);
+  display:block;
+  margin-bottom:8px;
+}
+
+blockquote.pullquote{
+  margin:40px 0;
+  padding:0;
+  border:0;
+}
+.pullquote p{
+  font-size:25px;
+  line-height:1.38;
+  font-weight:600;
+  margin:0 0 8px;
+  max-width:26ch;
+}
+.pullquote .mark{color:var(--accent-ink)}
+.pullquote footer{font-size:14px;color:var(--ink-soft)}
+
+aside.note{
+  border:1px solid var(--line);
+  background:var(--accent-tint);
+  border-radius:10px;
+  padding:14px 18px;
+  font-size:15.5px;
+  line-height:1.55;
+  margin:26px 0;
+  color:var(--ink);
+}
+aside.note .lbl{
+  font:700 11.5px/1 "Avenir Next","Segoe UI",sans-serif;
+  text-transform:uppercase;
+  letter-spacing:0.08em;
+  color:var(--accent-ink);
+  display:block;
+  margin-bottom:6px;
+}
+
+.tbl-wrap{overflow-x:auto;margin:26px 0}
+table{border-collapse:collapse;width:100%;font-size:15.5px}
+th{
+  text-align:left;
+  font:700 13px "Avenir Next","Segoe UI",sans-serif;
+  text-transform:uppercase;
+  letter-spacing:0.05em;
+  color:var(--ink-soft);
+  border-bottom:2px solid var(--ink);
+  padding:8px 12px 8px 0;
+}
+td{border-bottom:1px solid var(--line);padding:10px 12px 10px 0;vertical-align:top}
+td:last-child,th:last-child{padding-right:0}
+
+@media (max-width:620px){
+  header.mast{grid-template-columns:1fr}
+  .specimen-card{max-width:220px}
+}
+@media print{
+  body{background:#fff;color:#000}
+  .figure,aside.note,.specimen-card{print-color-adjust:exact;-webkit-print-color-adjust:exact}
+}
+</style>
+</head>
+<body>
+<main>
+
+<header class="mast">
+  <div>
+    <h1>How the model works, from first principles</h1>
+    <p class="standfirst">You already know attention. This is the other half of the deep learning world: how a convolutional network turns a wrecked raster into a clean answer key for the Rust engine, and where the one open design decision lives.</p>
+    <div class="chips">
+      <span class="chip">10 min read</span>
+      <span class="chip">Assumes: attention basics</span>
+      <span class="chip">vecml, Phase 0</span>
+    </div>
+  </div>
+  <figure class="specimen-card">
+    <svg viewBox="0 0 160 130" role="img" aria-label="Two overlapping translucent blue ellipses producing a darker lens where they overlap">
+      <ellipse cx="66" cy="60" rx="52" ry="40" fill="var(--specimen)" opacity="0.45" transform="rotate(-20 66 60)"/>
+      <ellipse cx="96" cy="70" rx="55" ry="38" fill="var(--specimen)" opacity="0.45"/>
+    </svg>
+    <figcaption>specimen b1412c1a…<br>3 regions, 2 shapes</figcaption>
+  </figure>
+</header>
+
+<div class="lead-box">
+  <span class="tag">The whole machine in one sentence</span>
+  The model is a single learned function: it takes a 256 by 256 grid of damaged pixels and outputs, for every one of those pixels, which flat region of the original artwork it belongs to. Everything below is detail on how that function is built and trained.
+</div>
+
+<p>We will follow one image through the entire machine: the specimen above, the file you flagged an hour ago. Two ellipses of the same translucent blue, whose overlap creates a third, darker colour. By the end you will know exactly what happens to its numbers at every stage, and why the machine is shaped the way it is.</p>
+
+<h2><span class="ord">STAGE 1</span>An image is a very different tensor from a sentence</h2>
+
+<p>An LLM eats a sequence: a few thousand tokens, each already a rich embedding, and attention lets every token consult every other. Our input is a picture: <span class="shape">256 × 256 × 3</span>, which is 65,536 pixels of three small numbers each (red, green, blue, scaled to roughly 0 to 1). No embeddings, no vocabulary. The raw numbers are the input.</p>
+
+<p>You could flatten those pixels into 65,536 tokens and run a transformer. Attention compares every position with every other, so that is about 4.3 billion pairwise comparisons per layer, spent mostly asking whether a pixel in the top-left corner is relevant to one in the bottom-right. For pictures that is the wrong question to ask first, because images have a property text does not have nearly as strongly: <strong>locality</strong>. The evidence for what a pixel is sits overwhelmingly in the pixels touching it. A blurry edge is diagnosed from its neighbourhood, not from across the canvas.</p>
+
+<h2><span class="ord">STAGE 2</span>Convolution: the same small question, asked everywhere</h2>
+
+<p>Attention learns <em>where to look</em>: routing is dynamic, computed per input. Convolution makes the opposite bet: it decides <em>what to look for</em> is the same everywhere, and hard-wires the looking. A convolutional filter is a tiny grid of learned weights, typically 3 by 3, and it is slid across every position of the image. At each position you multiply the window of pixels by the filter, sum the result, and write one number to an output grid. That output number means "how strongly does this exact spot match my pattern".</p>
+
+<figure class="figure">
+  <svg viewBox="0 0 720 208" role="img" aria-label="A 3 by 3 filter sliding over a pixel grid, producing one output value per position">
+    <defs>
+      <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+      </marker>
+    </defs>
+    <g>
+      <g stroke="var(--line-strong)" fill="var(--surface)">
+        <rect x="20" y="24" width="160" height="160"/>
+        <path d="M20 56h160M20 88h160M20 120h160M20 152h160M52 24v160M84 24v160M116 24v160M148 24v160" fill="none"/>
+      </g>
+      <rect x="52" y="56" width="96" height="96" fill="var(--accent-tint)" stroke="var(--accent)" stroke-width="2"/>
+      <text x="100" y="200" text-anchor="middle" class="ltext">input pixels</text>
+      <g style="color:var(--ink-soft)">
+        <path class="edge" d="M192 104 H252" marker-end="url(#arr)"/>
+      </g>
+      <text x="222" y="94" text-anchor="middle" class="ltext">×</text>
+      <g stroke="var(--line-strong)" fill="var(--surface)">
+        <rect x="262" y="56" width="96" height="96"/>
+        <path d="M262 88h96M262 120h96M294 56v96M326 56v96" fill="none"/>
+      </g>
+      <g class="mtext" text-anchor="middle">
+        <text x="278" y="77">-1</text><text x="310" y="77">0</text><text x="342" y="77">+1</text>
+        <text x="278" y="109">-2</text><text x="310" y="109">0</text><text x="342" y="109">+2</text>
+        <text x="278" y="141">-1</text><text x="310" y="141">0</text><text x="342" y="141">+1</text>
+      </g>
+      <text x="310" y="170" text-anchor="middle" class="ltext">one learned filter (9 weights)</text>
+      <g style="color:var(--ink-soft)">
+        <path class="edge" d="M370 104 H430" marker-end="url(#arr)"/>
+      </g>
+      <text x="400" y="94" text-anchor="middle" class="ltext">sum</text>
+      <g stroke="var(--line-strong)" fill="var(--surface)">
+        <rect x="440" y="24" width="160" height="160"/>
+        <path d="M440 56h160M440 88h160M440 120h160M440 152h160M472 24v160M504 24v160M536 24v160M568 24v160" fill="none"/>
+      </g>
+      <rect x="472" y="88" width="32" height="32" fill="var(--accent)" opacity="0.85"/>
+      <text x="520" y="200" text-anchor="middle" class="ltext">output: pattern strength at each spot</text>
+      <text x="672" y="100" text-anchor="middle" class="ntext">×32</text>
+      <text x="672" y="118" text-anchor="middle" class="ltext">filters,</text>
+      <text x="672" y="133" text-anchor="middle" class="ltext">in parallel</text>
+    </g>
+  </svg>
+  <figcaption>The filter shown is a classic vertical-edge detector: negative weights on the left, positive on the right, so it fires where dark meets light. The network learns its own 9 numbers per filter; nobody designs them.</figcaption>
+</figure>
+
+<p>Three consequences fall out of this design, and they are why convolution owns vision:</p>
+
+<ul>
+  <li><strong>Weight sharing.</strong> One filter is 9 numbers no matter how big the image is. A layer of 32 filters over our whole specimen costs about 300 weights. The equivalent fully-connected layer would need billions.</li>
+  <li><strong>Translation equivariance.</strong> An edge detector fires on edges wherever they appear. The network does not need to relearn "curve" separately for every location on the canvas, which is exactly right for logos that can sit anywhere.</li>
+  <li><strong>Locality matches the damage.</strong> JPEG blocks, blur, and noise are all local corruptions. The evidence needed to undo them is local too.</li>
+</ul>
+
+<p>One filter produces one output grid, called a feature map. A layer runs many filters in parallel, so its output is a stack: <span class="shape">256 × 256 × 32</span> after the first layer. The specimen is no longer red, green, blue at each pixel; it is now 32 numbers per pixel meaning "edge here", "blue-ish here", "smooth here". Stack layers and the vocabulary compounds: layer one sees edges, layer two sees corners and arcs built from those edges, layer three sees whole motifs. Same idea as deep layers of a transformer building from syntax to meaning, but grown outward from neighbourhoods instead of routed by attention.</p>
+
+<h2><span class="ord">STAGE 3</span>The U: trade <em>where</em> for <em>what</em>, then buy <em>where</em> back</h2>
+
+<p>Here is the tension that dictates the architecture. To decide what the specimen <em>is</em>, some part of the network must see all of it at once: "two overlapping ellipse-like blobs on white". But a 3 by 3 filter sees a 3 by 3 neighbourhood. The fix is to shrink the grid as you go deeper: halve the resolution every couple of layers while doubling the number of feature maps. Each cell of a smaller grid summarises a larger patch of the original, so by the bottom of the network one cell's view covers the whole picture.</p>
+
+<p>That solves understanding and breaks output. Our answer must be pixel-precise: the label map is judged at full resolution, and a boundary off by three pixels is a wrong answer key. So after descending, the network ascends: upsample the grid back, halving the feature count as resolution returns. And because the descent threw away fine position information on purpose, the ascent gets it back through <strong>skip connections</strong>: at each resolution, the feature maps from the way down are handed directly across to the way up, carrying exact edge positions the bottleneck never kept. Drawn honestly, the architecture is a U.</p>
+
+<figure class="figure">
+  <svg viewBox="0 0 740 400" role="img" aria-label="U-Net: an encoder descending on the left, a bottleneck at the base, a decoder ascending on the right, with skip connections bridging across">
+    <defs>
+      <marker id="arr2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+      </marker>
+    </defs>
+    <text x="30" y="30" class="ntext">wrecked input</text>
+    <text x="30" y="47" class="mtext">256² × 3</text>
+    <rect class="nodebox" x="30" y="58" width="150" height="42" rx="7"/>
+    <text x="105" y="84" text-anchor="middle" class="mtext">256² × 32</text>
+    <rect class="nodebox" x="70" y="138" width="130" height="42" rx="7"/>
+    <text x="135" y="164" text-anchor="middle" class="mtext">128² × 64</text>
+    <rect class="nodebox" x="110" y="218" width="110" height="42" rx="7"/>
+    <text x="165" y="244" text-anchor="middle" class="mtext">64² × 128</text>
+    <rect x="255" y="300" width="230" height="46" rx="7" fill="var(--accent-tint)" stroke="var(--accent)" stroke-width="1.8"/>
+    <text x="370" y="320" text-anchor="middle" class="mtext">32² × 256</text>
+    <text x="370" y="337" text-anchor="middle" class="ltext">each cell sees the whole image</text>
+    <rect class="nodebox" x="520" y="218" width="110" height="42" rx="7"/>
+    <text x="575" y="244" text-anchor="middle" class="mtext">64² × 128</text>
+    <rect class="nodebox" x="540" y="138" width="130" height="42" rx="7"/>
+    <text x="605" y="164" text-anchor="middle" class="mtext">128² × 64</text>
+    <rect class="nodebox" x="560" y="58" width="150" height="42" rx="7"/>
+    <text x="635" y="84" text-anchor="middle" class="mtext">256² × 32</text>
+    <text x="560" y="30" class="ntext">label map out</text>
+    <text x="560" y="47" class="mtext">256² per-pixel answer</text>
+    <g style="color:var(--ink-soft)">
+      <path class="edge" d="M105 100 L130 138" marker-end="url(#arr2)"/>
+      <path class="edge" d="M135 180 L160 218" marker-end="url(#arr2)"/>
+      <path class="edge" d="M180 260 L265 302" marker-end="url(#arr2)"/>
+      <path class="edge" d="M475 302 L560 260" marker-end="url(#arr2)"/>
+      <path class="edge" d="M605 218 L630 180" marker-end="url(#arr2)"/>
+      <path class="edge" d="M635 138 L660 100" marker-end="url(#arr2)"/>
+    </g>
+    <g style="color:var(--accent)">
+      <path class="skip" d="M184 79 H556" marker-end="url(#arr2)"/>
+      <path class="skip" d="M204 159 H536" marker-end="url(#arr2)"/>
+      <path class="skip" d="M224 239 H516" marker-end="url(#arr2)"/>
+    </g>
+    <text x="370" y="70" text-anchor="middle" class="ltext">skip connections: exact positions, handed across</text>
+    <text x="88" y="298" class="ltext" transform="rotate(-52 88 298)">resolution falls, meaning grows</text>
+    <text x="678" y="238" class="ltext" transform="rotate(52 678 238)">meaning returns to pixels</text>
+  </svg>
+  <figcaption>The signature shape of the network, with the specimen's real tensor sizes at every rung. The left arm works out <em>what</em> is in the picture, the base holds the global summary, the right arm paints that understanding back onto individual pixels, and the dashed bridges restore the precise <em>where</em>.</figcaption>
+</figure>
+
+<aside class="note">
+  <span class="lbl">Where your attention knowledge plugs in</span>
+  Notice the base of the U: a 32 by 32 grid is only 1,024 positions. That is transformer territory. Many modern segmentation networks run a few attention layers exactly there, where global reasoning is cheapest, and keep convolutions everywhere else. If we ever add attention, that is the slot. The pure-convolution U-Net comes first because it is small, fast on the M5, and the classic baseline.
+</aside>
+
+<h2><span class="ord">STAGE 4</span>The output problem: a network cannot say "region 3"</h2>
+
+<p>Now the honest open question, and the reason the first training run is designed to force a decision. Our answer keys say things like "pixel (40, 61) belongs to region 3 of this file". That works per file, but region numbers are arbitrary per image. A network's output layer is fixed at design time; there is no neuron that can mean "region 3" across a million different images, each with its own regions. So the model must express region membership some other way, and there are three standard candidates.</p>
+
+<div class="tbl-wrap">
+<table>
+  <tr><th>Head</th><th>The model outputs, per pixel</th><th>Trade-off</th></tr>
+  <tr>
+    <td><strong>Colour regression</strong></td>
+    <td>The clean RGB colour it believes belongs there</td>
+    <td>Simplest, but averaging is the failure mode: unsure between blue and white at a boundary, the loss rewards guessing pale blue, a colour that exists nowhere in the art. Muddy edges are precisely what we are trying to eliminate.</td>
+  </tr>
+  <tr>
+    <td><strong>Embedding + clustering</strong></td>
+    <td>A short vector; training pulls vectors of same-region pixels together and pushes different-region pixels apart</td>
+    <td>Handles any number of regions per image. At inference you cluster the vectors to recover regions. The mainstream choice for this problem shape, at the cost of a clustering step.</td>
+  </tr>
+  <tr>
+    <td><strong>Boundary + fill</strong></td>
+    <td>The probability that a region border passes through this pixel</td>
+    <td>Regions come free afterwards by flood-filling between borders, which is very friendly to a tracing engine. But a single one-pixel gap in a predicted border merges two regions, so errors are catastrophic rather than graceful.</td>
+  </tr>
+</table>
+</div>
+
+<p>Our specimen is a sharp test for all three. The overlap lens is a genuinely different colour than the lobes, so colour regression must not average it away; the embedding head must push lens pixels apart from lobe pixels despite both being blue; the boundary head must draw the lens outline even though no single source shape has that outline. This decision, not GPU shopping, is what the overfit run is for.</p>
+
+<h2><span class="ord">STAGE 5</span>Training: the same loop you already know, with a different exam</h2>
+
+<p>Mechanically, training this model is the same three-step loop as training an LLM. Only the tensors differ.</p>
+
+<ol>
+  <li><strong>Forward:</strong> feed the wrecked specimen through the U, get a predicted map.</li>
+  <li><strong>Loss:</strong> compare prediction against the answer key from the wrecking pipeline, pixel by pixel, and reduce all 65,536 verdicts to one number for how wrong the model was. An LLM's loss asks "did you predict the next token"; ours asks "did you label each pixel".</li>
+  <li><strong>Backward:</strong> backpropagation runs the chain rule in reverse to assign each of the network's weights its share of the blame, and the optimiser (Adam) nudges every weight slightly against its blame. Identical machinery, identical code path in PyTorch.</li>
+</ol>
+
+<p>The difference that matters is the exam supply. An LLM trains on found text. We <em>manufacture</em> our exams: the wrecking pipeline takes a clean SVG, renders it, damages it with a known recipe, and keeps the undamaged answer key. Every pair teaches the model one instance of the general lesson "this kind of mush, on this kind of art, hides these exact shapes". A million pairs later, the lesson is a prior: the model has seen JPEG ringing around two-colour boundaries so many times that it treats it as damage to see through rather than texture to preserve. That prior is the entire advantage over classical methods, which meet every image with no memory of any other image.</p>
+
+<blockquote class="pullquote">
+  <p>The classical engine reasons about <span class="mark">the pixels in front of it</span>. The model reasons with a million images it has already seen.</p>
+  <footer>Why a learned front-end can beat any hand-written heuristic on damaged input</footer>
+</blockquote>
+
+<aside class="note">
+  <span class="lbl">Why the first run deliberately overfits</span>
+  The first training run uses about 100 images and trains until the model reproduces their answer keys almost perfectly. Memorisation, not learning, and that is the point: a network that cannot even memorise 100 images has a plumbing bug (data loading, loss wiring, label format), while one that can proves the whole loop end to end. It is the "hello world" of training runs, it is free, and it runs on the M5 in minutes.
+</aside>
+
+<h2><span class="ord">STAGE 6</span>The relay: model eyes, engine hands</h2>
+
+<p>The model never draws a curve. Its output for the specimen is a cleaned, labelled map: these pixels are lobe one, these lobe two, these the darker lens, everything else background. That map goes to the Rust engine, which does what it already does well: trace exact shared boundaries through the planar map, fit curves, and emit SVG. The two never blur together. The model is not inside the engine and the engine is not inside the model; the model hands over a finished decision about <em>what shapes exist</em>, the engine turns that decision into geometry.</p>
+
+<figure class="figure">
+  <svg viewBox="0 0 720 120" role="img" aria-label="Pipeline: wrecked raster into model into label map into Rust engine into clean SVG">
+    <defs>
+      <marker id="arr3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+      </marker>
+    </defs>
+    <rect class="nodebox" x="14" y="34" width="122" height="52" rx="8"/>
+    <text x="75" y="56" text-anchor="middle" class="ntext">wrecked raster</text>
+    <text x="75" y="73" text-anchor="middle" class="ltext">customer file</text>
+    <rect x="176" y="34" width="122" height="52" rx="8" fill="var(--accent-tint)" stroke="var(--accent)" stroke-width="1.8"/>
+    <text x="237" y="56" text-anchor="middle" class="ntext">U-Net</text>
+    <text x="237" y="73" text-anchor="middle" class="ltext">learned eyes</text>
+    <rect class="nodebox" x="338" y="34" width="122" height="52" rx="8"/>
+    <text x="399" y="56" text-anchor="middle" class="ntext">label map</text>
+    <text x="399" y="73" text-anchor="middle" class="ltext">the handoff</text>
+    <rect x="500" y="34" width="122" height="52" rx="8" fill="var(--accent-tint)" stroke="var(--accent)" stroke-width="1.8"/>
+    <text x="561" y="56" text-anchor="middle" class="ntext">Rust engine</text>
+    <text x="561" y="73" text-anchor="middle" class="ltext">classical hands</text>
+    <g style="color:var(--ink-soft)">
+      <path class="edge" d="M136 60 H172" marker-end="url(#arr3)"/>
+      <path class="edge" d="M298 60 H334" marker-end="url(#arr3)"/>
+      <path class="edge" d="M460 60 H496" marker-end="url(#arr3)"/>
+      <path class="edge" d="M622 60 H656" marker-end="url(#arr3)"/>
+    </g>
+    <text x="686" y="57" class="ntext">clean</text>
+    <text x="686" y="73" class="ntext">SVG</text>
+  </svg>
+  <figcaption>A relay, not a fusion. During training only the left half exists; the engine appears at evaluation, where success is measured on the final SVG, not on model loss.</figcaption>
+</figure>
+
+<p>This is also why model loss is not our success metric. Loss measures pixels; the product is geometry. A model can nudge loss down by getting easy background pixels slightly more confident while still botching the one boundary that matters. So every candidate model gets judged the same way your classical attempts always have: run the full relay, score the final SVG with veval (colour error, reconstruction quality, holes), and compare it in the gallery against flat_quant on wrecked inputs it has never seen. The model earns its place in the pipeline the day the relay beats the engine alone.</p>
+
+<p>And that closes the loop on why your audit work this week mattered so much. Every mislabeled answer key, the deleted Python logo, the missing overlap lens, would have been taught to the model as truth, a million times over. The network is only ever as honest as its exams.</p>
+
+</main>
+</body>
+</html>

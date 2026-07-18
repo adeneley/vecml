@@ -28,17 +28,20 @@ from .wreck import apply_recipe, sample_recipe
 
 
 def _derive_ground_truth(svg_path, clean, size):
-    """Return (label_map, palette, n_declared, method).
+    """Return (label_map, palette, n_declared, method, warnings).
 
     Prefer geometry-derived labels; fall back to pixel derivation if the SVG
     cannot be turned into a clean answer key.
     """
     try:
-        label_map, palette, n_declared = derive_labels_from_svg(svg_path, size)
-        return label_map, palette, n_declared, "idmap"
+        warnings = []
+        label_map, palette, n_declared = derive_labels_from_svg(
+            svg_path, size, clean_rgb=clean, warn_sink=warnings
+        )
+        return label_map, palette, n_declared, "idmap-v3", warnings
     except DerivationError:
         label_map, palette = derive_labels_from_pixels(clean)
-        return label_map, palette, None, "pixels_fallback"
+        return label_map, palette, None, "pixels_fallback", []
 
 
 def wreck_svg(
@@ -58,7 +61,9 @@ def wreck_svg(
     out_dir.mkdir(parents=True, exist_ok=True)
 
     clean = render_svg(svg_path, size)
-    label_map, palette, n_declared, method = _derive_ground_truth(svg_path, clean, size)
+    label_map, palette, n_declared, method, warnings = _derive_ground_truth(
+        svg_path, clean, size
+    )
 
     qc = audit_sample(clean, label_map, palette, n_declared)
 
@@ -109,6 +114,7 @@ def wreck_svg(
         "n_palette": int(len(palette)),
         "n_declared": n_declared,
         "label_method": method,
+        "label_warnings": warnings,
         "qc": qc,
         "variants": variants,
     }

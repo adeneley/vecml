@@ -218,3 +218,140 @@ def test_audit_passes_a_good_sample(tmp_path):
     label_map, palette, n_declared = derive_labels_from_svg(svg, SIZE)
     qc = audit_sample(render_svg(svg, SIZE), label_map, palette, n_declared)
     assert qc["flags"] == []
+
+
+# --- CLASS B: translucent paint keeps its blended colour, is not deleted -------
+
+# Translucent white (opacity .18) over a solid green body: the classic "Python
+# logo over a coloured plate" case. Composited over WHITE this is white and used
+# to be binned as background and deleted; over the GREEN it is a pale green face.
+TRANSLUCENT_WHITE_SVG = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <rect x="0" y="0" width="200" height="200" fill="#647c64"/>
+  <rect x="50" y="50" width="100" height="100" fill="#ffffff" fill-opacity="0.18"/>
+</svg>
+"""
+
+# Translucent black shadow (opacity .35) over a tan body: a darkened face.
+TRANSLUCENT_BLACK_SVG = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <rect x="0" y="0" width="200" height="200" fill="#d2b48c"/>
+  <rect x="60" y="60" width="80" height="80" fill="#000000" fill-opacity="0.35"/>
+</svg>
+"""
+
+
+def test_translucent_white_over_colour_is_a_pale_face(tmp_path):
+    svg = _write(tmp_path, TRANSLUCENT_WHITE_SVG)
+    label_map, palette, n_declared = derive_labels_from_svg(svg, SIZE)
+
+    # Two faces: the green body and the pale-green overlay. Not deleted.
+    assert n_declared == 2
+    # The overlay sits at the centre; it must be labelled (not background)...
+    centre = int(label_map[SIZE // 2, SIZE // 2])
+    assert centre != 0
+    # ...and its colour is the .18-white-over-green blend, a pale green, clearly
+    # lighter than the body but nowhere near pure white.
+    overlay = palette[centre].astype(int)
+    body = np.array([100, 124, 100])  # #647c64
+    assert (overlay > body).all()  # lightened
+    assert not (overlay > 249).all()  # not binned as white background
+    # Reconstruction stays faithful.
+    clean = render_svg(svg, SIZE)
+    mae = np.abs(clean.astype(int) - palette[label_map].astype(int)).mean()
+    assert mae < 4.0
+
+
+def test_translucent_black_over_colour_is_a_darkened_face(tmp_path):
+    svg = _write(tmp_path, TRANSLUCENT_BLACK_SVG)
+    label_map, palette, n_declared = derive_labels_from_svg(svg, SIZE)
+
+    assert n_declared == 2
+    centre = int(label_map[SIZE // 2, SIZE // 2])
+    assert centre != 0
+    shadow = palette[centre].astype(int)
+    body = np.array([210, 180, 140])  # #d2b48c
+    assert (shadow < body).all()  # darkened by the black overlay
+    clean = render_svg(svg, SIZE)
+    mae = np.abs(clean.astype(int) - palette[label_map].astype(int)).mean()
+    assert mae < 4.0
+
+
+# --- CLASS C: overlapping translucent shapes make a distinct third face --------
+
+# Two same-colour translucent rects overlapping: the overlap is a visibly darker
+# third region. Topmost-shape ownership would give it to the upper rect (2
+# regions); planar-face ownership must see 3.
+TRANSLUCENT_OVERLAP_SVG = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <g fill="#73c0fb" fill-opacity="0.4">
+    <rect x="20" y="20" width="110" height="110"/>
+    <rect x="70" y="70" width="110" height="110"/>
+  </g>
+</svg>
+"""
+
+
+def test_translucent_overlap_makes_three_faces(tmp_path):
+    svg = _write(tmp_path, TRANSLUCENT_OVERLAP_SVG)
+    label_map, palette, n_declared = derive_labels_from_svg(svg, SIZE)
+
+    assert n_declared == 3  # two lobes plus the darker overlap lens
+    assert len(np.unique(label_map)) == 4  # + background
+
+    # The overlap sits at the shared centre; the two lobes at their far corners.
+    overlap = int(label_map[SIZE // 2, SIZE // 2])
+    lobe_a = int(label_map[int(SIZE * 0.22), int(SIZE * 0.22)])
+    lobe_b = int(label_map[int(SIZE * 0.80), int(SIZE * 0.80)])
+    assert 0 not in (overlap, lobe_a, lobe_b)
+    assert len({overlap, lobe_a, lobe_b}) == 3
+
+    # The overlap colour is darker (lower luminance) than either lobe.
+    lum = palette.astype(int).sum(axis=1)
+    assert lum[overlap] < lum[lobe_a]
+    assert lum[overlap] < lum[lobe_b]
+
+    clean = render_svg(svg, SIZE)
+    mae = np.abs(clean.astype(int) - palette[label_map].astype(int)).mean()
+    assert mae < 5.0
+
+
+# --- CLASS A: a sub-pixel stroke stays a connected, covered line ---------------
+
+# stroke-width 1 in a 300-unit viewBox is ~0.85px at 256 and vanishes / dashes
+# under a 1x crispEdges render. The 4x ownership render plus coverage rescue must
+# keep it as one connected line matching the clean render's inked pixels.
+THIN_STROKE_SVG = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 300">
+  <line x1="20" y1="150" x2="280" y2="150" stroke="#000000" stroke-width="1"/>
+</svg>
+"""
+
+
+def test_subpixel_stroke_survives_as_connected_line(tmp_path):
+    svg = _write(tmp_path, THIN_STROKE_SVG, name="thin.svg")
+    label_map, palette, n_declared = derive_labels_from_svg(svg, 256)
+    clean = render_svg(svg, 256)
+
+    assert n_declared == 1  # the black line
+    line = int(np.argmin(np.linalg.norm(palette.astype(int) - np.array([0, 0, 0]), axis=1)))
+    labelled = label_map == line
+
+    # The line must actually exist and span most of the width (not a stub).
+    cols_with_line = np.where(labelled.any(axis=0))[0]
+    assert cols_with_line.size > 0
+    assert cols_with_line.max() - cols_with_line.min() > 256 * 0.8
+
+    # Connected, not dashed: no interior column along the drawn span is empty.
+    span = labelled[:, cols_with_line.min() : cols_with_line.max() + 1]
+    assert span.any(axis=0).all()
+
+    # Coverage matches the clean render's inked pixels within tolerance (this is
+    # the invariant the audit's coverage_match metric checks).
+    ink = np.abs(clean.astype(int) - 255).max(axis=2) > 6
+    ink_frac = ink.mean()
+    label_frac = (label_map != 0).mean()
+    assert abs(ink_frac - label_frac) < 0.02
+
+
+def test_translucent_overlap_passes_audit(tmp_path):
+    svg = _write(tmp_path, TRANSLUCENT_OVERLAP_SVG)
+    label_map, palette, n_declared = derive_labels_from_svg(svg, SIZE)
+    qc = audit_sample(render_svg(svg, SIZE), label_map, palette, n_declared)
+    assert qc["flags"] == []

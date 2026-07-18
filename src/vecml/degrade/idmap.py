@@ -1,28 +1,37 @@
 """Ground-truth label maps derived from SVG geometry, not from pixels.
 
-The old path (labels.derive_labels_from_pixels) guessed the palette by counting
-colours in the rendered image, then folded near-white colours into the
+The old pixel path (labels.derive_labels_from_pixels) guessed the palette by
+counting colours in the rendered image, then folded near-white colours into the
 background. That heuristic silently deleted pale art (a #ececec icon, a cupcake's
 #e0eaeb frosting) because "near white" and "pale flat colour" look the same once
 you only have pixels to go on.
 
-This module goes back to the source. It reads which colours the SVG actually
-paints (fill and stroke, presentation attributes and inline style, resolving
-inheritance down the group tree), assigns each distinct visible colour a widely
-separated CODE colour, renders a recoloured copy through the same renderer, and
-reads the label of every pixel straight off its code colour. Because the code
-colours are forced opaque and the root is set to crispEdges, the render carries
-no blends: each pixel is exactly one code, so the label map is exact by
-construction and aligns pixel-perfect with the normal clean render (same viewBox,
-same fit).
+This module (idmap-v3) goes back to the source geometry but treats the SVG as a
+STACK of planar faces, matching the Rust engine's model, not as a bag of source
+shapes. It works in three moves:
 
-A colour that the SVG paints at reduced opacity gets a palette entry equal to
-that colour composited over white, which is what the clean render shows where the
-shape sits on the white background.
+  ownership (which face)  -- a crispEdges render assigns every pixel to the flat
+    region that is visible there. Opaque paint gets one code colour per distinct
+    opaque colour; a pixel's region is the stack of translucent leaves covering
+    it plus the first opaque owner (or background) beneath. Two pixels share a
+    region iff that whole stack is identical, so overlapping translucent shapes
+    (a darker lens) become their own third region.
+
+  coverage (which pixels) -- the ownership render runs at 4x supersample and is
+    downsampled with a coverage-aware vote so that sub-pixel strokes, which a 1x
+    crispEdges render drops entirely, survive: any target pixel the clean render
+    inks is forced to the nearest real region rather than binned as background.
+
+  colour (what shade)     -- the palette is NOT read from SVG paint. Each region
+    takes the median RGB of the CLEAN anti-aliased render over the pixels it
+    owns (eroded 1px to dodge anti-aliased edges). A translucent overlay simply
+    gets its blended colour; a face whose sampled colour is indistinguishable
+    from the page is folded back into background.
 
 Anything this module cannot turn into a clean flat answer key (a CSS <style>
-block, a gradient/pattern paint server) raises DerivationError so the caller can
-quarantine the file instead of shipping a wrong key.
+block, a gradient/pattern paint server, more translucent leaves than the bitmask
+can hold) raises DerivationError so the caller can quarantine the file instead of
+shipping a wrong key.
 """
 
 import copy
@@ -34,10 +43,13 @@ from pathlib import Path
 import numpy as np
 from PIL import ImageColor
 
+from .audit import ink_mask
 from .renderer import render_svg
 
 SVG_NS = "http://www.w3.org/2000/svg"
 XLINK_NS = "http://www.w3.org/1999/xlink"
+
+LABEL_METHOD = "idmap-v3"
 
 # Tags that carry paint and produce pixels.
 _PAINTABLE = {
@@ -77,10 +89,24 @@ _ANIMATION_TAGS = {"animate", "animatecolor", "animatetransform", "animatemotion
 # background, not as ink. Kept in step with the audit ink threshold (> 6).
 _WHITE_MARGIN = 6
 
-# Above this fraction of non-exact pixels we assume the renderer anti-aliased and
-# fall back to 4x supersample + majority vote. With resvg + crispEdges this never
-# fires, but a weaker backend might need it.
-_NONEXACT_FALLBACK = 0.15
+# Effective alpha at or above this counts as opaque: the paint fully covers what
+# is beneath it, so it is a solid face, not a translucent overlay. Detected from
+# the ORIGINAL resolved context alpha, before opacity is forced to 1 for render.
+_OPAQUE_EPS = 0.99
+
+# Supersample factor for the ownership render. 4x means 1024 for a 256 target,
+# enough to resolve a sub-pixel stroke that a 1x crispEdges render drops.
+_SUPERSAMPLE = 4
+
+# Most files have zero translucent leaves; those that do get one extra mask
+# render each and a bit in a fixed-width mask. Cap the count so the region key
+# stays inside a uint64 (with room to pack the opaque-owner id alongside).
+_TRANSLUCENT_CAP = 32
+
+# Solo mask paint: rendered on an otherwise-blank (white) canvas, so any pixel
+# that is not near-white is covered by the leaf under test.
+_MASK_PAINT = "#000000"
+_MASK_COVERED_BELOW = 200
 
 
 class DerivationError(Exception):
@@ -178,10 +204,10 @@ def _as_float(value, default):
         return default
 
 
-def _composite_over_white(rgb, alpha):
-    """Composite an opaque colour over white at the given alpha, as uint8."""
+def _composite_over(rgb, alpha, under):
+    """Composite an opaque colour over a base colour at the given alpha."""
     a = max(0.0, min(1.0, alpha))
-    return tuple(int(round(c * a + 255 * (1.0 - a))) for c in rgb)
+    return tuple(c * a + u * (1.0 - a) for c, u in zip(rgb, under))
 
 
 def _is_background(visible_rgb):
@@ -297,213 +323,449 @@ def _build_id_map(root):
     return id_map
 
 
-def _collect_and_recolour(root):
-    """Walk the tree, resolving <use>/<symbol> references. Return
-    (ordered_visible_colours, code_for, true_palette_dict).
+# --- geometry walk: expand <use>, force full opacity, record painted leaves ----
 
-    Mutates the tree in place: <use> elements are expanded into groups holding a
-    recoloured clone of their target, every element is forced fully opaque, each
-    paintable leaf gets its fill/stroke replaced by the CODE colour of its visible
-    colour (background colours become transparent so the shape beneath shows, no
-    paint stays no paint), and the root is marked crispEdges.
-    ordered_visible_colours lists the distinct foreground visible colours in
-    document order (label i = index i + 1).
+
+def _force_opaque_attrs(elem):
+    """Strip paint/opacity from an element and force it fully opaque.
+
+    Leaves get their fill/stroke set explicitly per render mode, so nothing here
+    relies on inheritance for colour; this only guarantees no element ever blends.
+    """
+    style = _parse_style(elem.get("style", "")) if elem.get("style") else {}
+    for drop in ("fill", "stroke", "fill-opacity", "stroke-opacity", "opacity"):
+        style.pop(drop, None)
+    elem.set("fill-opacity", "1")
+    elem.set("stroke-opacity", "1")
+    elem.set("opacity", "1")
+    if style:
+        elem.set("style", ";".join(f"{k}:{v}" for k, v in style.items()))
+    elif "style" in elem.attrib:
+        del elem.attrib["style"]
+
+
+def _expand_use(use_elem, id_map):
+    """Turn a <use> into a <g> holding a clone of its target, in place.
+
+    The use's own paint attributes are LEFT ON the <g> so the walk resolves them
+    into the clone's context (the use paints the referenced geometry). x/y become
+    a translate; href/xlink:href are dropped.
+    """
+    target = id_map.get(_href_id(use_elem))
+    x = use_elem.get("x")
+    y = use_elem.get("y")
+    transform = use_elem.get("transform", "")
+    if x or y:
+        transform = f"{transform} translate({x or 0},{y or 0})".strip()
+
+    use_elem.tag = f"{{{SVG_NS}}}g"
+    for key in ("x", "y", "href", f"{{{XLINK_NS}}}href"):
+        if key in use_elem.attrib:
+            del use_elem.attrib[key]
+    if transform:
+        use_elem.set("transform", transform)
+
+    if target is not None:
+        clone = copy.deepcopy(target)
+        if _local(clone.tag) == "symbol":
+            # A bare <symbol> is not rendered; a <g> with the same content is.
+            clone.tag = f"{{{SVG_NS}}}g"
+        use_elem.append(clone)
+
+
+def _walk_collect(root):
+    """Walk the tree (expanding <use>), forcing full opacity, recording leaves.
+
+    Returns a list of leaf records; each holds the element reference plus its
+    resolved fill/stroke colours and effective alphas, so callers can paint each
+    leaf differently per render mode without re-resolving inheritance.
     """
     id_map = _build_id_map(root)
+    leaves = []
 
-    order = []  # visible rgb tuples, document order
-    seen = {}  # visible rgb -> index in order
-    true_by_visible = {}  # visible rgb -> composited-over-white palette colour
+    def record(elem, ctx):
+        leaves.append(
+            {
+                "elem": elem,
+                "fill": ctx.fill,
+                "fa": (ctx.opacity * ctx.fill_op) if ctx.fill is not None else 0.0,
+                "stroke": ctx.stroke,
+                "sa": (ctx.opacity * ctx.stroke_op) if ctx.stroke is not None else 0.0,
+            }
+        )
 
-    def register(visible):
-        if visible not in seen:
-            seen[visible] = len(order)
-            order.append(visible)
-            true_by_visible[visible] = visible
-
-    def visible_fill(ctx):
-        if ctx.fill is None:
-            return None
-        return _composite_over_white(ctx.fill, ctx.opacity * ctx.fill_op)
-
-    def visible_stroke(ctx):
-        if ctx.stroke is None:
-            return None
-        return _composite_over_white(ctx.stroke, ctx.opacity * ctx.stroke_op)
-
-    # First pass: discover every visible colour so codes are assigned in order.
-    def discover(elem, ctx):
-        tag = _local(elem.tag)
+    def walk(elem, ctx):
         cctx = ctx.child(elem)
-        if tag in _PAINTABLE:
-            if cctx.fill is not None and not _is_background(visible_fill(cctx)):
-                register(visible_fill(cctx))
-            if cctx.stroke is not None and not _is_background(visible_stroke(cctx)):
-                register(visible_stroke(cctx))
+        _force_opaque_attrs(elem)
+        if _local(elem.tag) in _PAINTABLE:
+            record(elem, cctx)
         for child in list(elem):
             ctag = _local(child.tag)
             if ctag == "use":
-                target = id_map.get(_href_id(child))
-                if target is not None:
-                    discover(target, cctx.child(child))
+                _expand_use(child, id_map)
+                walk(child, cctx)  # child is now a <g> carrying the use's paint
             elif ctag in _TEMPLATE_TAGS or ctag in _NON_PAINT_CONTAINERS:
                 continue
             else:
-                discover(child, cctx)
+                walk(child, cctx)
 
     # SVG default fill is black; default `color` (for currentColor) is black.
     root_ctx = _Ctx((0, 0, 0), None, 1.0, 1.0, 1.0, (0, 0, 0))
-    discover(root, root_ctx)
-
-    codes = _codes_for(len(order))
-    code_for = {vis: tuple(int(x) for x in codes[i]) for vis, i in seen.items()}
-
-    def code_hex(visible):
-        c = code_for[visible]
-        return f"#{c[0]:02x}{c[1]:02x}{c[2]:02x}"
-
-    def paint_value(paint_colour, alpha):
-        # No paint renders as nothing.
-        if paint_colour is None:
-            return "none"
-        visible = _composite_over_white(paint_colour, alpha)
-        if _is_background(visible):
-            # An OPAQUE white shape genuinely paints paper: it covers whatever is
-            # beneath, so it reads as background (white, label 0). A TRANSLUCENT
-            # near-white paint is a tint or highlight, so it defers to the shape
-            # beneath (transparent) rather than erasing its colour.
-            return "#ffffff" if alpha >= 0.9 else "none"
-        return code_hex(visible)
-
-    def expand_use(use_elem, ctx):
-        """Turn a <use> into a <g> holding a recoloured clone of its target."""
-        uctx = ctx.child(use_elem)
-        target = id_map.get(_href_id(use_elem))
-
-        x = use_elem.get("x")
-        y = use_elem.get("y")
-        transform = use_elem.get("transform", "")
-        if x or y:
-            transform = f"{transform} translate({x or 0},{y or 0})".strip()
-
-        use_elem.tag = f"{{{SVG_NS}}}g"
-        use_elem.attrib.clear()
-        if transform:
-            use_elem.set("transform", transform)
-        use_elem.set("fill-opacity", "1")
-        use_elem.set("stroke-opacity", "1")
-        use_elem.set("opacity", "1")
-
-        if target is not None:
-            clone = copy.deepcopy(target)
-            if _local(clone.tag) == "symbol":
-                # A bare <symbol> is not rendered; a <g> with the same content is.
-                clone.tag = f"{{{SVG_NS}}}g"
-            recolour(clone, uctx)
-            use_elem.append(clone)
-
-    # Second pass: rewrite paint. Forcing opacity to 1 everywhere kills any blend.
-    def recolour(elem, ctx):
-        tag = _local(elem.tag)
-        cctx = ctx.child(elem)
-
-        style = _parse_style(elem.get("style", "")) if elem.get("style") else {}
-        for drop in ("fill", "stroke", "fill-opacity", "stroke-opacity", "opacity"):
-            style.pop(drop, None)
-
-        if tag in _PAINTABLE:
-            elem.set("fill", paint_value(cctx.fill, cctx.opacity * cctx.fill_op))
-            elem.set("stroke", paint_value(cctx.stroke, cctx.opacity * cctx.stroke_op))
-
-        # Force full opacity on every element so nothing blends.
-        elem.set("fill-opacity", "1")
-        elem.set("stroke-opacity", "1")
-        elem.set("opacity", "1")
-        if style:
-            elem.set("style", ";".join(f"{k}:{v}" for k, v in style.items()))
-        elif "style" in elem.attrib:
-            del elem.attrib["style"]
-
-        for child in list(elem):
-            ctag = _local(child.tag)
-            if ctag == "use":
-                expand_use(child, cctx)
-            elif ctag in _TEMPLATE_TAGS or ctag in _NON_PAINT_CONTAINERS:
-                continue  # templates render only through <use>; leave them be
-            else:
-                recolour(child, cctx)
-
-    recolour(root, root_ctx)
+    walk(root, root_ctx)
     root.set("shape-rendering", "crispEdges")
+    return leaves
 
-    return order, code_for, true_by_visible
+
+def _classify(leaves):
+    """Split leaf paint into opaque colours (faces) and translucent units.
+
+    Each leaf channel (fill, stroke) is one of:
+      opaque       -- alpha >= _OPAQUE_EPS, real colour: a solid face colour.
+      paper        -- alpha >= _OPAQUE_EPS but near-white: covers as background.
+      translucent  -- alpha < _OPAQUE_EPS: a blended overlay, gets its own bit.
+    Mutates each leaf record with per-channel "<ch>_kind" (and "<ch>_bit").
+    Returns (opaque_order, opaque_index, translucent_units).
+    """
+    opaque_order = []  # distinct opaque rgb tuples, first-seen order
+    opaque_index = {}
+    translucent_units = []  # (leaf_idx, channel) in document order == paint order
+
+    def reg_opaque(rgb):
+        if rgb not in opaque_index:
+            opaque_index[rgb] = len(opaque_order)
+            opaque_order.append(rgb)
+
+    for i, lf in enumerate(leaves):
+        for ch, akey in (("fill", "fa"), ("stroke", "sa")):
+            rgb = lf[ch]
+            if rgb is None:
+                lf[ch + "_kind"] = None
+                continue
+            alpha = lf[akey]
+            if alpha >= _OPAQUE_EPS:
+                if _is_background(rgb):
+                    lf[ch + "_kind"] = "paper"
+                else:
+                    reg_opaque(rgb)
+                    lf[ch + "_kind"] = "opaque"
+            else:
+                lf[ch + "_kind"] = "translucent"
+                lf[ch + "_bit"] = len(translucent_units)
+                translucent_units.append((i, ch))
+
+    if len(translucent_units) > _TRANSLUCENT_CAP:
+        raise DerivationError(
+            f"too many translucent leaves ({len(translucent_units)}) for the "
+            f"region bitmask (cap {_TRANSLUCENT_CAP})"
+        )
+    return opaque_order, opaque_index, translucent_units
 
 
-def _labels_from_render(idmap_rgb, order, code_for):
-    """Map an id-map render to a label array using the used code colours."""
-    h, w = idmap_rgb.shape[:2]
-    candidates = [(255, 255, 255)] + [code_for[vis] for vis in order]
-    cand = np.array(candidates, dtype=np.float32)
+# --- rendering the ownership stack ---------------------------------------------
 
-    pixels = idmap_rgb.reshape(-1, 3).astype(np.float32)
+
+def _code_hex(code):
+    return f"#{code[0]:02x}{code[1]:02x}{code[2]:02x}"
+
+
+def _render_current_tree(root, box):
+    """Serialise the (already mutated) tree and render it to an RGB array."""
+    ET.register_namespace("", SVG_NS)
+    ET.register_namespace("xlink", XLINK_NS)
+    text = ET.tostring(root, encoding="unicode")
+    with tempfile.NamedTemporaryFile(
+        suffix=".svg", mode="w", delete=False, encoding="utf-8"
+    ) as fh:
+        fh.write(text)
+        tmp_path = fh.name
+    try:
+        return render_svg(tmp_path, box)
+    finally:
+        Path(tmp_path).unlink(missing_ok=True)
+
+
+def _nearest_labels(rgb, candidates):
+    """Map an RGB render to nearest-candidate indices (0 == white/background)."""
+    h, w = rgb.shape[:2]
+    cand = np.asarray(candidates, dtype=np.float32)
+    pixels = rgb.reshape(-1, 3).astype(np.float32)
     labels = np.empty(pixels.shape[0], dtype=np.int64)
-    worst = 0.0
-    nonexact = 0
     chunk = 200_000
     for start in range(0, pixels.shape[0], chunk):
         block = pixels[start : start + chunk]
         d = np.linalg.norm(block[:, None, :] - cand[None, :, :], axis=2)
-        idx = np.argmin(d, axis=1)
-        mind = d[np.arange(len(block)), idx]
-        labels[start : start + chunk] = idx
-        nonexact += int(np.count_nonzero(mind > 1.0))
-        worst = max(worst, float(mind.max()))
-
-    nonexact_frac = nonexact / max(1, pixels.shape[0])
-    return labels.reshape(h, w), nonexact_frac
+        labels[start : start + chunk] = np.argmin(d, axis=1)
+    return labels.reshape(h, w)
 
 
-def _render_labels(recoloured_svg_text, size, order, code_for, supersample):
-    """Render the recoloured SVG (optionally at supersample x) and read labels."""
-    box = size * supersample
-    with tempfile.NamedTemporaryFile(
-        suffix=".svg", mode="w", delete=False, encoding="utf-8"
-    ) as fh:
-        fh.write(recoloured_svg_text)
-        tmp_path = fh.name
-    try:
-        idmap_rgb = render_svg(tmp_path, box)
-    finally:
-        Path(tmp_path).unlink(missing_ok=True)
+def _render_region_map(root, leaves, opaque_order, opaque_index, translucent_units, box):
+    """Render the ownership stack at the given box size, returning a region map.
 
-    labels, nonexact_frac = _labels_from_render(idmap_rgb, order, code_for)
-    if supersample == 1:
-        return labels, nonexact_frac
+    Region value 0 == background. Every other value is a distinct planar face.
+    For a pixel whose topmost paint is OPAQUE, the face is simply that opaque
+    colour (whatever translucent paint lies buried beneath is not visible). For a
+    pixel whose topmost paint is TRANSLUCENT, the face is identified by (topmost
+    opaque owner beneath, bitmask of translucent leaves covering the pixel), so
+    two overlapping translucent shapes form their own third face. Also returns
+    region_meta: id -> (opaque_label, bitmask).
+    """
+    n_opaque = len(opaque_order)
+    has_translucent = bool(translucent_units)
+    # One extra code (the marker) is needed to flag translucent-topmost pixels.
+    all_codes = [tuple(int(x) for x in c) for c in _codes_for(n_opaque + (1 if has_translucent else 0))]
+    codes = all_codes[:n_opaque]
+    marker = all_codes[n_opaque] if has_translucent else None
 
-    # Majority vote down each supersample x supersample block.
-    n_labels = len(order) + 1
-    blocks = labels.reshape(size, supersample, size, supersample)
-    best_count = np.zeros((size, size), dtype=np.int32)
+    def base_paint(lf, ch):
+        kind = lf.get(ch + "_kind")
+        if kind == "opaque":
+            return _code_hex(codes[opaque_index[lf[ch]]])
+        if kind == "paper":
+            return "#ffffff"
+        return "none"  # translucent (hidden here) or no paint
+
+    # Base render: opaque faces only, translucent leaves hidden. Gives the
+    # topmost opaque owner (or background) beneath everything translucent.
+    for lf in leaves:
+        lf["elem"].set("fill", base_paint(lf, "fill"))
+        lf["elem"].set("stroke", base_paint(lf, "stroke"))
+    base_rgb = _render_current_tree(root, box)
+    opaque_labels = _nearest_labels(base_rgb, [(255, 255, 255)] + codes)  # 0..K
+
+    if not has_translucent:
+        # Fast path: no overlays, the base render is the whole answer.
+        key = opaque_labels.astype(np.int64)
+        return _keys_to_regions(key)
+
+    # Combined render: opaque faces keep their colour, every translucent leaf
+    # paints the single marker colour. The topmost paint wins per crispEdges, so
+    # a pixel showing an opaque code has an opaque top (translucent buried below),
+    # and a pixel showing the marker has a translucent top.
+    def combined_paint(lf, ch):
+        kind = lf.get(ch + "_kind")
+        if kind == "opaque":
+            return _code_hex(codes[opaque_index[lf[ch]]])
+        if kind == "paper":
+            return "#ffffff"
+        if kind == "translucent":
+            return _code_hex(marker)
+        return "none"
+
+    for lf in leaves:
+        lf["elem"].set("fill", combined_paint(lf, "fill"))
+        lf["elem"].set("stroke", combined_paint(lf, "stroke"))
+    combined_rgb = _render_current_tree(root, box)
+    combined = _nearest_labels(combined_rgb, [(255, 255, 255)] + codes + [marker])
+    marker_label = n_opaque + 1  # index of the marker in the candidate list
+
+    # One solo mask render per translucent unit: where does that leaf paint?
+    bitmask = np.zeros(opaque_labels.shape, dtype=np.uint64)
+    for bit, (leaf_idx, ch) in enumerate(translucent_units):
+        for lf in leaves:
+            lf["elem"].set("fill", "none")
+            lf["elem"].set("stroke", "none")
+        leaves[leaf_idx]["elem"].set(ch, _MASK_PAINT)
+        solo_rgb = _render_current_tree(root, box)
+        covered = solo_rgb.min(axis=2) < _MASK_COVERED_BELOW
+        bitmask[covered] |= np.uint64(1) << np.uint64(bit)
+
+    # Where the top paint is opaque, the face is that opaque colour with an empty
+    # overlay stack (bitmask 0). Where the top paint is translucent, the face is
+    # (opaque owner beneath, overlay bitmask). Elsewhere it is background.
+    opaque_top = (combined >= 1) & (combined <= n_opaque)
+    translucent_top = combined == marker_label
+    owner = np.where(opaque_top, combined, opaque_labels).astype(np.int64)
+    bits = np.where(translucent_top, bitmask.astype(np.int64), np.int64(0))
+    key = (bits << np.int64(16)) | owner
+    return _keys_to_regions(key)
+
+
+def _keys_to_regions(key):
+    """Turn a per-pixel packed region key into a compact region map + meta."""
+    uniq = np.unique(key)
+    ids = np.zeros(len(uniq), dtype=np.int64)
+    region_meta = {}
+    next_id = 1
+    for idx, k in enumerate(uniq):
+        opaque_label = int(k & 0xFFFF)
+        bm = int(k >> np.int64(16))
+        if opaque_label == 0 and bm == 0:
+            ids[idx] = 0  # background: no owner, no overlay
+        else:
+            ids[idx] = next_id
+            region_meta[next_id] = (opaque_label, bm)
+            next_id += 1
+    region_map = ids[np.searchsorted(uniq, key)]
+    return region_map, region_meta
+
+
+# --- downsample with coverage rescue (CLASS A) ---------------------------------
+
+
+def _rescue_nearest(out, need, radius):
+    """Fill each 'need' pixel with the nearest non-background label within radius."""
+    src = out.copy()
+    h, w = out.shape
+    ys, xs = np.where(need)
+    for y, x in zip(ys.tolist(), xs.tolist()):
+        best_lbl = 0
+        best_d = None
+        for dy in range(-radius, radius + 1):
+            ny = y + dy
+            if ny < 0 or ny >= h:
+                continue
+            for dx in range(-radius, radius + 1):
+                nx = x + dx
+                if nx < 0 or nx >= w:
+                    continue
+                lbl = src[ny, nx]
+                if lbl != 0:
+                    d = dy * dy + dx * dx
+                    if best_d is None or d < best_d:
+                        best_d = d
+                        best_lbl = lbl
+        if best_lbl:
+            out[y, x] = best_lbl
+
+
+def _downsample(region_map, clean_rgb, size, ss):
+    """Downsample a super-sampled region map to `size` with a coverage-aware vote.
+
+    Per target pixel: majority label over the ss x ss block, EXCEPT when the
+    majority is background but the clean render inks that pixel, in which case the
+    most common non-background label in the block wins (or, if the block holds no
+    non-background label at all, the nearest one within ~2px). This keeps the
+    label map explaining every inked pixel of the clean render, which is exactly
+    what the coverage_match audit metric measures.
+    """
+    present = np.unique(region_map)
+    blocks = region_map.reshape(size, ss, size, ss)
+    counts = {}
     out = np.zeros((size, size), dtype=np.int64)
-    for lbl in range(n_labels):
-        count = np.sum(blocks == lbl, axis=(1, 3))
-        take = count > best_count
+    best_count = np.zeros((size, size), dtype=np.int64)
+    for lbl in present.tolist():
+        c = np.sum(blocks == lbl, axis=(1, 3))
+        counts[lbl] = c
+        take = c > best_count
         out[take] = lbl
-        best_count[take] = count[take]
-    return out, nonexact_frac
+        best_count[take] = c[take]
+
+    inked = ink_mask(clean_rgb)
+
+    # Most common NON-background label per block, and whether one exists at all.
+    has_nonbg = np.zeros((size, size), dtype=bool)
+    best_nonbg = np.zeros((size, size), dtype=np.int64)
+    best_nonbg_c = np.zeros((size, size), dtype=np.int64)
+    for lbl in present.tolist():
+        if lbl == 0:
+            continue
+        c = counts[lbl]
+        has_nonbg |= c > 0
+        take = c > best_nonbg_c
+        best_nonbg[take] = lbl
+        best_nonbg_c[take] = c[take]
+
+    override = (out == 0) & inked & has_nonbg
+    out[override] = best_nonbg[override]
+
+    rescue = (out == 0) & inked & (~has_nonbg)
+    if rescue.any():
+        _rescue_nearest(out, rescue, radius=2)
+    return out
 
 
-def derive_labels_from_svg(svg_path, size):
+# --- palette sampling from the clean render (CLASS B) --------------------------
+
+
+def _erode1(mask):
+    """4-connectivity 1px erosion, border treated as outside (erodes)."""
+    out = np.zeros_like(mask)
+    if mask.shape[0] < 3 or mask.shape[1] < 3:
+        return out
+    out[1:-1, 1:-1] = (
+        mask[1:-1, 1:-1]
+        & mask[:-2, 1:-1]
+        & mask[2:, 1:-1]
+        & mask[1:-1, :-2]
+        & mask[1:-1, 2:]
+    )
+    return out
+
+
+def _analytic_colour(meta, opaque_order, translucent_units, leaves):
+    """Composited-paint colour for a region, the last-resort palette fallback.
+
+    Starts from the opaque owner (or white), then composites each covering
+    translucent unit over it in paint order. Only used when a region owns no
+    clean pixels at all, which the label map makes practically impossible.
+    """
+    opaque_label, bm = meta
+    if opaque_label > 0:
+        colour = tuple(float(c) for c in opaque_order[opaque_label - 1])
+    else:
+        colour = (255.0, 255.0, 255.0)
+    for bit, (leaf_idx, ch) in enumerate(translucent_units):
+        if bm & (1 << bit):
+            lf = leaves[leaf_idx]
+            alpha = lf["fa"] if ch == "fill" else lf["sa"]
+            colour = _composite_over(lf[ch], alpha, colour)
+    return np.array(colour, dtype=np.float32)
+
+
+def _sample_colour(mask, clean_rgb, meta, opaque_order, translucent_units, leaves):
+    """Median clean-render colour a region owns, eroded 1px to dodge AA edges."""
+    eroded = _erode1(mask)
+    if eroded.any():
+        return np.median(clean_rgb[eroded].astype(np.float32), axis=0)
+    if mask.any():
+        return np.median(clean_rgb[mask].astype(np.float32), axis=0)
+    return _analytic_colour(meta, opaque_order, translucent_units, leaves)
+
+
+def _finalize(label_map, clean_rgb, region_meta, opaque_order, translucent_units, leaves):
+    """Sample each region's colour, fold near-white faces into background, and
+    renumber the survivors to a compact palette."""
+    present = [int(lbl) for lbl in np.unique(label_map) if lbl != 0]
+    palette_rows = [(255, 255, 255)]
+    remap = {0: 0}
+    next_id = 1
+    for old in present:
+        mask = label_map == old
+        colour = _sample_colour(
+            mask, clean_rgb, region_meta.get(old), opaque_order, translucent_units, leaves
+        )
+        rounded = tuple(int(round(c)) for c in colour)
+        if _is_background(rounded):
+            # Indistinguishable from the page: a genuine-white or invisible face.
+            remap[old] = 0
+        else:
+            remap[old] = next_id
+            palette_rows.append(rounded)
+            next_id += 1
+
+    out = np.zeros_like(label_map)
+    for old, new in remap.items():
+        if new != 0:
+            out[label_map == old] = new
+    palette = np.array(palette_rows, dtype=np.uint8)
+    return out, palette, next_id - 1
+
+
+def derive_labels_from_svg(svg_path, size, clean_rgb=None, warn_sink=None):
     """Return (label_map, palette, n_declared) derived from SVG geometry.
 
-    label_map: HxW uint8/uint16, label 0 = white background, aligned to the
-      clean render produced by renderer.render_svg(svg_path, size).
-    palette: (N+1)x3 uint8 of the TRUE colours (row 0 white), reduced-opacity
-      colours composited over white.
-    n_declared: number of distinct foreground visible colours the SVG declares
-      (== len(palette) - 1 by construction; the audit compares them).
+    label_map: HxW uint8/uint16, label 0 = background, aligned to the clean render
+      produced by renderer.render_svg(svg_path, size).
+    palette: (N+1)x3 uint8 of each region's colour sampled from the clean render
+      (row 0 white). Translucent overlays get their blended colour.
+    n_declared: number of distinct foreground faces (== len(palette) - 1).
 
-    Raises DerivationError for CSS blocks, paint servers, or unparseable SVGs.
+    clean_rgb: the clean render, if the caller already has it (saves a render).
+    warn_sink: optional list; non-fatal warnings (e.g. a 4x render fell back to
+      1x) are appended for the caller to record in meta.
+
+    Raises DerivationError for CSS blocks, paint servers, unparseable SVGs, or
+    more translucent leaves than the region bitmask can hold.
     """
     svg_path = Path(svg_path)
     try:
@@ -513,18 +775,27 @@ def derive_labels_from_svg(svg_path, size):
     root = tree.getroot()
 
     _check_no_css(root)
-    order, code_for, true_by_visible = _collect_and_recolour(root)
+    if clean_rgb is None:
+        clean_rgb = render_svg(svg_path, size)
 
-    ET.register_namespace("", SVG_NS)
-    ET.register_namespace("xlink", XLINK_NS)
-    recoloured = ET.tostring(root, encoding="unicode")
+    leaves = _walk_collect(root)
+    opaque_order, opaque_index, translucent_units = _classify(leaves)
 
-    labels, nonexact_frac = _render_labels(recoloured, size, order, code_for, 1)
-    if nonexact_frac > _NONEXACT_FALLBACK:
-        labels, _ = _render_labels(recoloured, size, order, code_for, 4)
+    args = (root, leaves, opaque_order, opaque_index, translucent_units)
+    try:
+        region_ss, region_meta = _render_region_map(*args, size * _SUPERSAMPLE)
+        label_map = _downsample(region_ss, clean_rgb, size, _SUPERSAMPLE)
+    except DerivationError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - a bad 4x render must not abort the file
+        if warn_sink is not None:
+            warn_sink.append(f"supersample render failed ({exc}); fell back to 1x")
+        region_map, region_meta = _render_region_map(*args, size)
+        label_map = _downsample(region_map, clean_rgb, size, 1)
 
-    palette_rows = [(255, 255, 255)] + [true_by_visible[vis] for vis in order]
-    palette = np.array(palette_rows, dtype=np.uint8)
+    label_map, palette, n_declared = _finalize(
+        label_map, clean_rgb, region_meta, opaque_order, translucent_units, leaves
+    )
 
     dtype = np.uint8 if len(palette) <= 255 else np.uint16
-    return labels.astype(dtype), palette, len(order)
+    return label_map.astype(dtype), palette, n_declared
