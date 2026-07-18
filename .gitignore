@@ -9,3 +9,4 @@ __pycache__/
 .DS_Store
 uv.lock
 datasets/
+infra/runpod/.env
