@@ -114,6 +114,7 @@ read -r -d '' BODY <<JSON || true
   "computeType": "${COMPUTE_TYPE}",
   $( [ "${MODE}" = "gpu" ] && echo "\"gpuTypeIds\": [\"${GID}\"], \"gpuCount\": 1," || echo "\"vcpuCount\": ${VCPU}," )
   "cloudType": "SECURE",
+  $( [ -n "${RUNPOD_REGISTRY_AUTH_ID:-}" ] && echo "\"containerRegistryAuthId\": \"${RUNPOD_REGISTRY_AUTH_ID}\"," )
   "interruptible": ${SPOT},
   "containerDiskInGb": ${CONTAINER_DISK_GB},
   "networkVolumeId": "${RUNPOD_VOLUME_ID:-}",

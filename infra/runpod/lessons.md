@@ -64,11 +64,12 @@ Two CPU pods in a row hit `toomanyrequests` pulling vecml-cpu; one crawled at
 ~5MB/s, the next fail-looped. RunPod hosts share egress IPs, so GHCR's
 anonymous rate limit is effectively already spent when your pull starts. GPU
 pulls only succeeded earlier by landing on luckier hosts.
-**Fixes (do before next fleet):** (a) register a GitHub PAT (read:packages) as
-a RunPod container-registry credential and set containerRegistryAuthId in
-deploy.sh - authenticated pulls skip the anonymous limit; (b) slim the images:
-the CPU image carries the cu128 CUDA torch (~8.3GB layer) it can never use -
-pin CPU-only torch for the cpu target (~1.5GB total).
+**Fixes:** (a) DONE 19 Jul 2026: GitHub token (gh auth refresh -s
+read:packages) registered as RunPod registry credential "ghcr-adeneley";
+deploy.sh injects containerRegistryAuthId from RUNPOD_REGISTRY_AUTH_ID in the
+gitignored .env - authenticated pulls skip the anonymous limit. (b) still
+open: slim the images - the CPU image carries the cu128 CUDA torch (~8.3GB
+layer) it can never use; pin CPU-only torch for the cpu target (~1.5GB total).
 
 ## 10. Verify live state before destructive ops
 A pod was torn down based on a pasted log snippet that was actually stale
