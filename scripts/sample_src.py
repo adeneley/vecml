@@ -32,6 +32,16 @@ def main():
                     help="text file of shas (one per line) to skip")
     ap.add_argument("--record-shas", action="store_true",
                     help="append the sampled shas to the --exclude-shas file")
+    ap.add_argument("--record-to", default=None,
+                    help="write this run's sampled shas to a separate file "
+                         "(sharded pods must not race on the shared ledger)")
+    ap.add_argument("--shard", default=None,
+                    help="'i/k': take slice i of k from the deterministic "
+                         "sample. Every pod computes the identical shuffled "
+                         "pick list (same seed + same exclusion file), so "
+                         "disjoint slices need no coordination. Union of "
+                         "shards 0..j-1 of k = a uniform n*j/k sample, which "
+                         "is how one 1M build also yields the 500k set.")
     ap.add_argument("--seed", type=int, default=1000)
     args = ap.parse_args()
 
@@ -47,28 +57,35 @@ def main():
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
 
-    picked = 0
+    # Deterministic pick list: sorted corpus walk, filter exclusions, one
+    # seeded shuffle, first n. Identical on every machine that sees the same
+    # corpus + exclusion file, which is what makes --shard coordination-free.
+    pool = [p for p in sorted(Path(args.clean).glob("*/*.svg"))
+            if p.stem not in used]
+    if args.n > len(pool):
+        raise SystemExit(f"corpus exhausted: want {args.n}, {len(pool)} unused")
+    rng.shuffle(pool)
+    chosen = pool[: args.n]
+    if args.shard:
+        i, k = (int(x) for x in args.shard.split("/"))
+        chunk = (args.n + k - 1) // k
+        chosen = chosen[i * chunk: (i + 1) * chunk]
+        print(f"shard {i}/{k}: {len(chosen)} of {args.n}")
+
     sampled = []
-    shards = sorted(Path(args.clean).iterdir())
-    while picked < args.n:
-        shard = rng.choice(shards)
-        files = list(shard.glob("*.svg"))
-        if not files:
-            continue
-        f = rng.choice(files)
-        if f.stem in used:
-            continue
-        used.add(f.stem)
+    for j, f in enumerate(chosen, 1):
         sampled.append(f.stem)
         shutil.copy2(f, out / f.name)
-        picked += 1
-        if picked % 100 == 0:
-            print(f"{picked}/{args.n}")
+        if j % 5000 == 0:
+            print(f"{j}/{len(chosen)}", flush=True)
+    if args.record_to:
+        Path(args.record_to).write_text("".join(s + "\n" for s in sampled))
+        print(f"recorded {len(sampled)} shas -> {args.record_to}")
     if args.record_shas and shas_file:
         with open(shas_file, "a") as fh:
             fh.write("".join(s + "\n" for s in sampled))
         print(f"recorded {len(sampled)} shas -> {shas_file}")
-    print(f"done: {picked} SVGs -> {out}")
+    print(f"done: {len(sampled)} SVGs -> {out}")
 
 
 if __name__ == "__main__":

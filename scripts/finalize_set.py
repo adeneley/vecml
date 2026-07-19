@@ -20,6 +20,10 @@ from PIL import Image
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--root", required=True)
+    ap.add_argument("--prune", action="store_true",
+                    help="delete flagged dirs instead of relying on the audit "
+                         "file (shard tarballs merge into one dir, so a "
+                         "single _audit_summary.json cannot carry the flags)")
     args = ap.parse_args()
     root = Path(args.root)
 
@@ -45,12 +49,21 @@ def main():
                 flagged.add(d.name)
                 badkeys += 1
 
-    (root / "_audit_summary.json").write_text(
-        json.dumps({"flagged_names": sorted(flagged)}, indent=2)
-    )
+    if args.prune:
+        import shutil
+        for name in flagged:
+            shutil.rmtree(root / name, ignore_errors=True)
+        (root / "_audit_summary.json").write_text(
+            json.dumps({"flagged_names": [], "pruned": len(flagged)}, indent=2)
+        )
+    else:
+        (root / "_audit_summary.json").write_text(
+            json.dumps({"flagged_names": sorted(flagged)}, indent=2)
+        )
     print(
         f"finalized {root}: {total} dirs, {partial} partial, {blanks} blank, "
         f"{badkeys} bad answer keys, usable {total - len(flagged)}"
+        + (" (flagged pruned)" if args.prune else "")
     )
 
 
