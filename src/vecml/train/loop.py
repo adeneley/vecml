@@ -390,7 +390,9 @@ class Trainer:
                             "step": global_step,
                             "epoch": epoch,
                             "loss": loss_val,
-                            "epoch_mean": epoch_loss_sum / max(epoch_items, 1),
+                            # Early in an epoch nothing has synced yet; show the
+                            # last window mean instead of a bogus 0.0.
+                            "epoch_mean": (epoch_loss_sum / epoch_items) if epoch_items else loss_val,
                             "loss_ce": ce_val,
                             "lr": optim.param_groups[0]["lr"],
                             "img_per_s": window_imgs / dt,
