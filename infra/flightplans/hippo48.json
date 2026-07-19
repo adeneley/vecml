@@ -1,0 +1,18 @@
+{
+  "comment": "hippo-48: the combo rung. b48's width (4.3M params) + w010's loss weight on the same 100k diet as hippo. One variable vs hippo (base), one vs b48 (data+weight): does capacity start paying once the library is big enough to fill it?",
+  "runs": [
+    {
+      "name": "hippo48-100k",
+      "data_root": "/tmp/data/train-100k",
+      "n": 100000,
+      "val_n": 1000,
+      "n_classes": 16,
+      "label_loss_w": 0.1,
+      "base": 48,
+      "max_epochs": 40,
+      "target_loss": 0.003,
+      "cache_ram": false,
+      "num_workers": 16
+    }
+  ]
+}
