@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import base64
 import io
+import random
 import subprocess
 import threading
 import time
@@ -294,12 +295,18 @@ class Trainer:
         loss_fn = nn.L1Loss()
         ce_fn = nn.CrossEntropyLoss() if cfg.n_classes else None
 
-        # Fixed items for the live sample views: drawn from the held-out split
-        # when one exists (so the 4-up shows images the model never trains on).
+        # Live sample views, drawn from the held-out split when one exists
+        # (so the 4-up shows images the model never trains on). Item 0 is
+        # FIXED for the whole run - the single triptych tracks one image's
+        # progress - while the other three are re-drawn at random from the
+        # pool on every broadcast, so the 4-up rotates through the val set.
         pool = val_set if val_set is not None else dataset
-        n_show = min(4, len(pool))
-        idxs = sorted({round(i * (len(pool) - 1) / max(n_show - 1, 1)) for i in range(n_show)})
-        val_items = [pool[i] for i in idxs]
+        anchor = pool[0]
+
+        def draw_sample_items() -> list:
+            k = min(3, max(len(pool) - 1, 0))
+            others = random.sample(range(1, len(pool)), k) if k else []
+            return [anchor] + [pool[i] for i in others]
 
         ckpt_dir = Path(cfg.ckpt_dir)
         ckpt_dir.mkdir(parents=True, exist_ok=True)
@@ -419,7 +426,7 @@ class Trainer:
                     last_metric_t = now
 
                 if first or (now - last_sample_t) >= cfg.sample_interval_s:
-                    self._emit_sample(model, val_items, global_step)
+                    self._emit_sample(model, draw_sample_items(), global_step)
                     last_sample_t = now
 
             if stopped:

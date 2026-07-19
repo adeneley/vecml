@@ -113,6 +113,8 @@
   .tile img.flash { animation: frameflash .55s ease-out; }
   /* 4-up view: four framed pairs, prediction mounted over its target */
   .frames.quad { grid-template-columns: repeat(4, 1fr); gap: 16px; }
+  /* author display rules beat the hidden attribute; restore its meaning */
+  [hidden] { display: none !important; }
   .pairwrap { display: flex; align-items: center; justify-content: center;
     min-height: 0; min-width: 0; }
   .pair { height: 100%; max-width: 100%; aspect-ratio: 1 / 2;
