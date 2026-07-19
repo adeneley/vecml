@@ -233,6 +233,9 @@
     <div class="stat"><div class="k">loss now</div><div class="v" id="s_loss">&mdash;</div></div>
     <div class="stat"><div class="k">loss best</div><div class="v" id="s_best">&mdash;</div></div>
     <div class="stat"><div class="k">epoch mean</div><div class="v" id="s_emean" style="color:var(--accent2)">&mdash;</div></div>
+    <!-- dual-head runs only: unhidden when the run first reports them -->
+    <div class="stat" id="st_ce" hidden><div class="k">labels loss</div><div class="v" id="s_ce">&mdash;</div></div>
+    <div class="stat" id="st_acc" hidden><div class="k">label acc</div><div class="v" id="s_acc">&mdash;</div></div>
     <div class="stat"><div class="k">lr</div><div class="v" id="s_lr">&mdash;</div></div>
     <div class="stat"><div class="k">img / s</div><div class="v" id="s_ips">&mdash;</div></div>
     <div class="stat"><div class="k">elapsed</div><div class="v" id="s_elapsed">&mdash;</div></div>
@@ -630,6 +633,7 @@
         "epoch " + (p.epoch == null ? "-" : p.epoch)];
       if (p.epoch_mean != null) lines.push("epoch mean " + fmtNum(p.epoch_mean));
       if (p.val_mean != null) lines.push("val mean " + fmtNum(p.val_mean));
+      if (p.loss_ce != null) lines.push("labels CE " + fmtNum(p.loss_ce));
       if (p.lr != null) lines.push("lr " + p.lr.toExponential(2));
       ctx.font = "11px ui-monospace, Menlo, monospace";
       let tw = 0; for (const t of lines) tw = Math.max(tw, ctx.measureText(t).width);
@@ -704,6 +708,8 @@
     TARGET = 0.003; MAX_EPOCHS = null;  // next run's status event re-supplies
     clockBase = 0; clockAt = 0; ipsInit = false; ipsShown = 0; ipsTarget = 0;
     $("s_best").textContent = "—"; $("s_emean").textContent = "—"; $("s_lr").textContent = "—";
+    $("st_ce").hidden = true; $("st_acc").hidden = true;
+    $("s_ce").textContent = "—"; $("s_acc").textContent = "—";
     draw();
   }
 
@@ -735,6 +741,13 @@
       $("s_loss").textContent = fmt(ev.loss, 4);
       if (ev.loss < best) { best = ev.loss; $("s_best").textContent = fmt(best, 4); }
       if (ev.epoch_mean != null) $("s_emean").textContent = fmt(ev.epoch_mean, 4);
+      if (ev.loss_ce != null) {
+        $("st_ce").hidden = false; $("s_ce").textContent = fmt(ev.loss_ce, 4);
+      }
+      if (ev.val_acc != null) {
+        $("st_acc").hidden = false;
+        $("s_acc").textContent = (100 * ev.val_acc).toFixed(1) + "%";
+      }
       if (ev.lr != null) $("s_lr").textContent = ev.lr.toExponential(2);
       // img/s: feed the glide target; snap directly when the smooth timer is idle
       if (ev.img_per_s != null) {
@@ -748,7 +761,8 @@
         if (!smoothTimer) $("s_elapsed").textContent = fmt(ev.elapsed_s, 1) + "s";
       }
       losses.push({ step: ev.step, loss: ev.loss, epoch: ev.epoch,
-        epoch_mean: ev.epoch_mean, val_mean: ev.val_mean, lr: ev.lr });
+        epoch_mean: ev.epoch_mean, val_mean: ev.val_mean, lr: ev.lr,
+        loss_ce: ev.loss_ce });
       draw();
     } else if (ev.type === "sample") {
       lastSampleEv = ev;
