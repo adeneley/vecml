@@ -32,6 +32,11 @@ def main() -> None:
                     help="hold out the last N pairs for per-epoch validation")
     ap.add_argument("--classes", type=int, default=0,
                     help="label-map head with K classes (0 = RGB-only)")
+    ap.add_argument("--workers", type=int, default=0, help="dataloader workers")
+    ap.add_argument("--cache", action="store_true",
+                    help="cache decoded images in RAM (skip per-epoch PNG decode)")
+    ap.add_argument("--no-amp", action="store_true",
+                    help="disable bf16 autocast on CUDA")
     ap.add_argument("--port", type=int, default=7300)
     ap.add_argument("--host", default="127.0.0.1",
                     help="bind address (0.0.0.0 for remote pods behind a proxy)")
@@ -52,6 +57,9 @@ def main() -> None:
         "ckpt_dir": f"runs/overfit{args.n}" + ("-lab" if args.classes else ""),
         "val_n": args.val,
         "n_classes": args.classes,
+        "num_workers": args.workers,
+        "cache_ram": args.cache,
+        "amp": not args.no_amp,
     }
     app = create_app(defaults, readonly=args.readonly, autostart=args.autostart)
 

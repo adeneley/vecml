@@ -690,6 +690,10 @@
       document.body.classList.remove("idle");
       $("s_step").textContent = ev.step;
       $("s_epoch").textContent = ev.epoch;
+      if (ev.gpu_util != null) {
+        $("s_device").textContent = "cuda · " + Math.round(ev.gpu_util) + "%"
+          + (ev.gpu_mem_gb != null ? " · " + ev.gpu_mem_gb + "G" : "");
+      }
       $("s_loss").textContent = fmt(ev.loss, 4);
       if (ev.loss < best) { best = ev.loss; $("s_best").textContent = fmt(best, 4); }
       if (ev.epoch_mean != null) $("s_emean").textContent = fmt(ev.epoch_mean, 4);

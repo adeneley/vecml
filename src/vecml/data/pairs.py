@@ -110,6 +110,10 @@ class PairsDataset(Dataset):
     n_classes:
         When set, items are (wrecked, clean, labels) and dirs whose palette
         exceeds n_classes colours (or lack label files) are dropped.
+    cache_ram:
+        Keep decoded uint8 images in RAM after first touch, skipping PNG
+        decode on every later epoch. ~2GB per 10k pairs at 256px; with
+        num_workers > 0 each worker holds its own copy of what it touches.
     """
 
     def __init__(
@@ -120,11 +124,13 @@ class PairsDataset(Dataset):
         variant: int = 0,
         skip_flagged: bool = True,
         n_classes: int | None = None,
+        cache_ram: bool = False,
     ):
         self.root = Path(root)
         self.size = size
         self.variant = variant
         self.n_classes = n_classes
+        self._cache: dict | None = {} if cache_ram else None
         dirs = list_sample_dirs(self.root, skip_flagged=skip_flagged)
         if n_classes is not None:
             dirs = [d for d in dirs if self._labels_ok(d, n_classes)]
@@ -153,10 +159,33 @@ class PairsDataset(Dataset):
     def __len__(self) -> int:
         return len(self.dirs)
 
+    def _rgb(self, path: Path) -> torch.Tensor:
+        if self._cache is None:
+            return _load_rgb(path, self.size)
+        arr = self._cache.get(path)
+        if arr is None:
+            img = Image.open(path).convert("RGB")
+            if self.size is not None and img.size != (self.size, self.size):
+                img = img.resize((self.size, self.size), Image.BILINEAR)
+            arr = np.asarray(img, dtype=np.uint8)
+            self._cache[path] = arr
+        t = torch.from_numpy(arr.astype(np.float32) / 255.0)
+        return t.permute(2, 0, 1).contiguous()
+
+    def _labels(self, d: Path) -> torch.Tensor:
+        if self._cache is None:
+            return _load_labels(d, self.size, self.n_classes)
+        key = d / "labels.png"
+        lab = self._cache.get(key)
+        if lab is None:
+            lab = _load_labels(d, self.size, self.n_classes)
+            self._cache[key] = lab
+        return lab
+
     def __getitem__(self, i: int) -> tuple[torch.Tensor, ...]:
         d = self.dirs[i]
-        wrecked = _load_rgb(self._wrecked_path(d), self.size)
-        clean = _load_rgb(d / "clean.png", self.size)
+        wrecked = self._rgb(self._wrecked_path(d))
+        clean = self._rgb(d / "clean.png")
         if self.n_classes is None:
             return wrecked, clean
-        return wrecked, clean, _load_labels(d, self.size, self.n_classes)
+        return wrecked, clean, self._labels(d)

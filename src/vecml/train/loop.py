@@ -16,9 +16,11 @@ from __future__ import annotations
 
 import base64
 import io
+import subprocess
 import threading
 import time
 import traceback
+from contextlib import nullcontext
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -46,6 +48,39 @@ LABEL_COLOURS = np.array(
 )
 
 EventSink = Callable[[dict], None]
+
+
+class GpuMonitor(threading.Thread):
+    """Background nvidia-smi sampler; latest util%/VRAM exposed as attrs.
+
+    Subprocess polling (not pynvml) to stay dependency-free; at one sample
+    every couple of seconds the fork cost is irrelevant.
+    """
+
+    def __init__(self, interval_s: float = 2.0):
+        super().__init__(daemon=True)
+        self.interval_s = interval_s
+        self.util: float | None = None
+        self.mem_gb: float | None = None
+        self._stop = threading.Event()
+
+    def stop(self) -> None:
+        self._stop.set()
+
+    def run(self) -> None:
+        while not self._stop.is_set():
+            try:
+                out = subprocess.run(
+                    ["nvidia-smi", "--query-gpu=utilization.gpu,memory.used",
+                     "--format=csv,noheader,nounits"],
+                    capture_output=True, text=True, timeout=5,
+                ).stdout.strip().splitlines()[0]
+                util, mem = out.split(",")
+                self.util = float(util)
+                self.mem_gb = round(float(mem) / 1024, 1)
+            except Exception:
+                self.util = self.mem_gb = None
+            self._stop.wait(self.interval_s)
 
 
 def pick_device() -> str:
@@ -110,6 +145,11 @@ class TrainConfig:
     # comparable across modes.
     n_classes: int = 0
     label_loss_w: float = 0.25
+    # Throughput levers (see scripts/bench.py for finding the right values):
+    # bf16 autocast on CUDA, pinned host memory, in-RAM decoded-image cache.
+    amp: bool = True
+    pin_memory: bool = True
+    cache_ram: bool = False
     extra: dict = field(default_factory=dict)
 
 
@@ -168,6 +208,7 @@ class Trainer:
             size=cfg.size,
             variant=cfg.variant,
             n_classes=cfg.n_classes or None,
+            cache_ram=cfg.cache_ram,
         )
         val_n = min(cfg.val_n, max(len(dataset) - 1, 0))
         if val_n > 0:
@@ -183,8 +224,21 @@ class Trainer:
             batch_size=cfg.batch_size,
             shuffle=True,
             num_workers=cfg.num_workers,
+            pin_memory=cfg.pin_memory and self.device == "cuda",
+            persistent_workers=cfg.num_workers > 0,
             drop_last=False,
         )
+        use_amp = cfg.amp and self.device == "cuda"
+        # bf16 needs no GradScaler; MPS stays fp32 (past burns earn caution).
+        amp_ctx = (
+            (lambda: torch.autocast("cuda", dtype=torch.bfloat16))
+            if use_amp
+            else nullcontext
+        )
+        gpu_mon = None
+        if self.device == "cuda":
+            gpu_mon = GpuMonitor()
+            gpu_mon.start()
 
         if cfg.n_classes:
             model = UNet(head=lambda c: DualHead(c, cfg.n_classes)).to(self.device)
@@ -233,15 +287,16 @@ class Trainer:
                 y = batch[1].to(self.device)
                 lab = batch[2].to(self.device) if ce_fn is not None else None
 
-                out = model(x)
                 ce_val = None
-                if ce_fn is not None:
-                    l1 = loss_fn(out["rgb"], y)
-                    ce = ce_fn(out["logits"], lab)
-                    loss = l1 + cfg.label_loss_w * ce
-                    ce_val = float(ce.detach().to("cpu").item())
-                else:
-                    l1 = loss = loss_fn(out, y)
+                with amp_ctx():
+                    out = model(x)
+                    if ce_fn is not None:
+                        l1 = loss_fn(out["rgb"], y)
+                        ce = ce_fn(out["logits"], lab)
+                        loss = l1 + cfg.label_loss_w * ce
+                        ce_val = float(ce.detach().to("cpu").item())
+                    else:
+                        l1 = loss = loss_fn(out, y)
 
                 optim.zero_grad()
                 loss.backward()
@@ -285,6 +340,8 @@ class Trainer:
                             "lr": optim.param_groups[0]["lr"],
                             "img_per_s": window_imgs / dt,
                             "elapsed_s": now - start,
+                            "gpu_util": gpu_mon.util if gpu_mon else None,
+                            "gpu_mem_gb": gpu_mon.mem_gb if gpu_mon else None,
                         }
                     )
                     window_start = now
@@ -349,6 +406,8 @@ class Trainer:
                 )
                 break
 
+        if gpu_mon is not None:
+            gpu_mon.stop()
         if stopped:
             self._emit({"type": "status", "state": "stopped", "detail": "user stop"})
         else:
