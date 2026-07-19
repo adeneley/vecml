@@ -132,12 +132,24 @@ class PairsDataset(Dataset):
         self.n_classes = n_classes
         self._cache: dict | None = {} if cache_ram else None
         dirs = list_sample_dirs(self.root, skip_flagged=skip_flagged)
+        n_before_label_filter = len(dirs)
         if n_classes is not None:
             dirs = [d for d in dirs if self._labels_ok(d, n_classes)]
         if n is not None:
             dirs = dirs[:n]
         if not dirs:
-            raise ValueError(f"no usable sample dirs under {self.root}")
+            # Diagnose loudly: remote crash logs are the only debugger a pod has.
+            if not self.root.is_dir():
+                raise ValueError(f"no usable sample dirs: root {self.root} does not exist")
+            entries = sorted(p.name for p in self.root.iterdir())
+            probe = next((p for p in sorted(self.root.iterdir()) if p.is_dir()), None)
+            probe_files = sorted(f.name for f in probe.iterdir())[:8] if probe else []
+            raise ValueError(
+                f"no usable sample dirs under {self.root}: "
+                f"{len(entries)} entries, {n_before_label_filter} sample dirs "
+                f"before label filter (n_classes={n_classes}); "
+                f"first entries {entries[:4]}; probe dir {probe and probe.name}: {probe_files}"
+            )
         self.dirs = dirs
 
     @staticmethod
