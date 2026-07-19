@@ -1,0 +1,18 @@
+{
+  "comment": "hippo48-500k: the scaling-curve datapoint. Identical config to hippo48-1m but fed only shards 0-3 (~463k usable) - the shuffled-slice property makes any shard union a uniform sample. With 100k (hippo48-100k) and 1M (hippo48-1m) at the same protocol this completes a 10k/100k/500k/1M curve that says whether the next move is a 5M mint or a bigger model.",
+  "runs": [
+    {
+      "name": "hippo48-500k",
+      "data_root": "/tmp/data/train-1m",
+      "n": 500000,
+      "val_n": 2000,
+      "n_classes": 16,
+      "label_loss_w": 0.1,
+      "base": 48,
+      "max_epochs": 16,
+      "target_loss": 0.003,
+      "cache_ram": false,
+      "num_workers": 16
+    }
+  ]
+}

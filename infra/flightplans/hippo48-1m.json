@@ -1,0 +1,18 @@
+{
+  "comment": "hippo48-1m: the milly. base48 + label_loss_w 0.1 (the two probe winners) fed the full 8-shard 1M mint (~925k usable after prune). 16 epochs of fresh-data passes replaces the 40-epoch repetition diet - at 100k both hippo runs still had zero train/val gap, so unique images remain the binding constraint. Cosine LR (built into the loop) stretches over max_epochs automatically. n requests 1M and clamps to whatever survived the audit.",
+  "runs": [
+    {
+      "name": "hippo48-1m",
+      "data_root": "/tmp/data/train-1m",
+      "n": 1000000,
+      "val_n": 2000,
+      "n_classes": 16,
+      "label_loss_w": 0.1,
+      "base": 48,
+      "max_epochs": 16,
+      "target_loss": 0.003,
+      "cache_ram": false,
+      "num_workers": 16
+    }
+  ]
+}
