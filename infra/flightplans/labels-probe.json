@@ -1,15 +1,6 @@
 {
-  "comment": "19 Jul 2026 reassessment flight. Run A verdict: label head costs ~2x cleanup dE at 1.9M params, flatten buys 5-9% at the engine. Two suspects for the tax: (1) CE loss pressure too high, (2) capacity contention. One probe each, plus a short compiled-recipe sanity run first (compare its epoch means vs labels-10k-a's first 40 epochs before trusting the two real runs).",
+  "comment": "19 Jul 2026 reassessment flight. Run A verdict: label head costs ~2x cleanup dE at 1.9M params, flatten buys 5-9% at the engine. Two suspects for the tax: (1) CE loss pressure too high, (2) capacity contention. One probe each. The 2x recipe was cleared by labels-sanity-2x (epoch-39 val 0.0093 vs Run A's 0.0094).",
   "runs": [
-    {
-      "name": "labels-sanity-2x",
-      "data_root": "/tmp/data/train-10k",
-      "n": 10000,
-      "val_n": 500,
-      "n_classes": 16,
-      "max_epochs": 40,
-      "cache_ram": true
-    },
     {
       "name": "labels-w010",
       "data_root": "/tmp/data/train-10k",
