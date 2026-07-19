@@ -144,6 +144,36 @@
   .cap { flex: 0 0 auto; text-align: center; color: var(--muted); font-size: 12px;
     font-variant-numeric: tabular-nums; }
   .console { grid-column: 1 / -1; grid-row: 3; }
+  /* header tabs */
+  .tabs { display: flex; gap: 4px; background: var(--panel2); border: 1px solid var(--line);
+    border-radius: 8px; padding: 3px; }
+  .tab { font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; border: none;
+    background: transparent; color: var(--muted); padding: 4px 14px; border-radius: 6px; }
+  .tab.on { background: var(--panel); color: var(--fg); box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+  body.runview #run { display: none; }
+  /* run tab */
+  main.runmain { display: flex; flex-direction: column; gap: 12px;
+    padding: 12px 20px; height: calc(100vh - 42px); }
+  .runbar { flex: 0 0 auto; }
+  #ckpt_sel { font: inherit; font-size: 13px; padding: 5px 8px; border-radius: 6px;
+    border: 1px solid var(--line); background: var(--panel); color: var(--fg); max-width: 340px; }
+  #drop { flex: 0 0 auto; margin-top: 10px; border: 1.5px dashed var(--line); border-radius: 8px;
+    padding: 18px; text-align: center; color: var(--muted); cursor: pointer;
+    transition: border-color .15s, background .15s; }
+  #drop.over { border-color: var(--accent); background: #eef4fb; }
+  #infer_btn { font: inherit; font-weight: 600; font-size: 14px; cursor: pointer;
+    padding: 6px 22px; border-radius: 8px; border: none; color: #fff; background: var(--accent); }
+  #infer_btn:disabled { opacity: .5; cursor: default; }
+  .rframes { flex: 1 1 auto; min-height: 0; display: grid;
+    grid-auto-flow: column; grid-auto-columns: 1fr; gap: 14px; }
+  .rcol { display: flex; flex-direction: column; min-height: 0; gap: 6px; }
+  .rframe { flex: 1 1 auto; min-height: 0; border: 1px solid var(--line); border-radius: 8px;
+    background: var(--panel2); display: flex; align-items: center; justify-content: center;
+    padding: 8px; overflow: hidden; }
+  .rframe img { max-width: 100%; max-height: 100%; object-fit: contain; image-rendering: pixelated; }
+  .rlbl { flex: 0 0 auto; text-align: center; font-size: 11px; color: var(--muted);
+    text-transform: uppercase; letter-spacing: .5px; }
+  .rcol[hidden] { display: none; }
   #log {
     flex: 1 1 auto; min-height: 0; overflow-y: auto; background: #eaeef4; border-radius: 6px;
     padding: 10px 12px; font: 12px/1.5 ui-monospace, "SF Mono", Menlo, monospace;
@@ -158,12 +188,16 @@
 <body class="idle">
 <header>
   <h1>vecml cockpit</h1>
+  <nav class="tabs">
+    <button class="tab on" id="tab_train">train</button>
+    <button class="tab" id="tab_run">run</button>
+  </nav>
   <span id="pill" class="pill">idle</span>
   <span class="spacer"></span>
   <button id="run">Start</button>
 </header>
 
-<main>
+<main id="view_train">
   <div class="card" id="chartWrap">
     <div class="card-head">
       <h2>training loss (L1)</h2>
@@ -263,6 +297,34 @@
       <button class="toggle" id="t_clear" title="clear console">clear</button>
     </div>
     <div id="log"></div>
+  </div>
+</main>
+
+<main class="runmain" id="view_run" hidden>
+  <div class="card runbar">
+    <div class="card-head">
+      <h2>run a model</h2>
+      <select id="ckpt_sel"></select>
+      <button class="toggle" id="ckpt_refresh" title="rescan runs/ for checkpoints">refresh</button>
+      <span class="cap" id="ckpt_info"></span>
+      <span class="grow"></span>
+      <button id="infer_btn" disabled>Run</button>
+    </div>
+    <div id="drop">drop an image here, click to browse, or paste from the clipboard</div>
+    <input type="file" id="file_in" accept="image/*" hidden>
+  </div>
+  <div class="card" style="flex:1 1 auto">
+    <div class="card-head">
+      <h2>result</h2>
+      <span class="grow"></span>
+      <span class="cap" id="infer_cap">no image yet</span>
+    </div>
+    <div class="rframes">
+      <div class="rcol"><div class="rframe"><img id="r_in" alt="" hidden></div><div class="rlbl">input</div></div>
+      <div class="rcol"><div class="rframe"><img id="r_pred" alt="" hidden></div><div class="rlbl">cleaned (rgb head)</div></div>
+      <div class="rcol" id="rc_lab" hidden><div class="rframe"><img id="r_lab" alt="" hidden></div><div class="rlbl">regions (label head)</div></div>
+      <div class="rcol" id="rc_flat" hidden><div class="rframe"><img id="r_flat" alt="" hidden></div><div class="rlbl">flattened (engine input)</div></div>
+    </div>
   </div>
 </main>
 
@@ -707,6 +769,106 @@
       if (r.status === 409) { log("[ui] already running", "dim"); runBtn.disabled = false; }
       else log("[ui] start requested", "dim");
     }
+  });
+
+  // --- run tab (inference) ---
+  let uploadDataUrl = null;
+  const ckptSel = $("ckpt_sel");
+
+  function showTab(run) {
+    $("view_train").hidden = run;
+    $("view_run").hidden = !run;
+    document.body.classList.toggle("runview", run);
+    $("tab_train").classList.toggle("on", !run);
+    $("tab_run").classList.toggle("on", run);
+    if (run) loadCkpts();
+    else { sizeCanvas(); draw(); } // canvas lost its size while hidden
+  }
+  $("tab_train").addEventListener("click", () => showTab(false));
+  $("tab_run").addEventListener("click", () => showTab(true));
+
+  async function loadCkpts() {
+    try {
+      const list = await (await fetch("/ckpts")).json();
+      const prev = ckptSel.value;
+      ckptSel.innerHTML = "";
+      list.forEach((c) => {
+        const o = document.createElement("option");
+        o.value = c.path;
+        o.textContent = c.name
+          + (c.n_classes ? " · labels K" + c.n_classes : " · rgb")
+          + (c.loss != null ? " · loss " + Number(c.loss).toFixed(4) : "");
+        ckptSel.appendChild(o);
+      });
+      if (prev && [...ckptSel.options].some((o) => o.value === prev)) ckptSel.value = prev;
+      $("ckpt_info").textContent = list.length
+        ? list.length + " checkpoint" + (list.length === 1 ? "" : "s")
+        : "no checkpoints under runs/";
+      syncInferBtn();
+    } catch (_) { $("ckpt_info").textContent = "checkpoint scan failed"; }
+  }
+  $("ckpt_refresh").addEventListener("click", loadCkpts);
+  ckptSel.addEventListener("change", syncInferBtn);
+
+  function syncInferBtn() { $("infer_btn").disabled = !(uploadDataUrl && ckptSel.value); }
+
+  function acceptFile(file) {
+    if (!file || !file.type.startsWith("image/")) return;
+    const rd = new FileReader();
+    rd.onload = () => {
+      uploadDataUrl = rd.result;
+      const img = $("r_in");
+      img.src = uploadDataUrl;
+      img.hidden = false;
+      $("infer_cap").textContent = (file.name || "pasted image") + " · ready";
+      syncInferBtn();
+    };
+    rd.readAsDataURL(file);
+  }
+
+  const drop = $("drop");
+  drop.addEventListener("click", () => $("file_in").click());
+  $("file_in").addEventListener("change", (e) => acceptFile(e.target.files[0]));
+  ["dragover", "dragenter"].forEach((t) => drop.addEventListener(t, (e) => {
+    e.preventDefault(); drop.classList.add("over");
+  }));
+  ["dragleave", "drop"].forEach((t) => drop.addEventListener(t, (e) => {
+    e.preventDefault(); drop.classList.remove("over");
+  }));
+  drop.addEventListener("drop", (e) => acceptFile(e.dataTransfer.files[0]));
+  document.addEventListener("paste", (e) => {
+    if ($("view_run").hidden || !e.clipboardData) return;
+    const item = [...e.clipboardData.items].find((i) => i.type.startsWith("image/"));
+    if (item) acceptFile(item.getAsFile());
+  });
+
+  $("infer_btn").addEventListener("click", async () => {
+    const btn = $("infer_btn");
+    btn.disabled = true;
+    $("infer_cap").textContent = "running…";
+    try {
+      const r = await fetch("/infer", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ckpt: ckptSel.value, image: uploadDataUrl }),
+      });
+      const res = await r.json();
+      if (!r.ok) throw new Error(res.error || ("http " + r.status));
+      const set = (id, b64) => {
+        const im = $(id); im.src = "data:image/png;base64," + b64; im.hidden = false;
+      };
+      set("r_in", res.input);
+      set("r_pred", res.pred);
+      const hasLab = !!res.labels;
+      $("rc_lab").hidden = !hasLab;
+      $("rc_flat").hidden = !hasLab;
+      if (hasLab) { set("r_lab", res.labels); set("r_flat", res.flat); }
+      $("infer_cap").textContent = res.ms + " ms"
+        + (hasLab ? " · " + res.n_regions + " regions" : "");
+    } catch (e) {
+      $("infer_cap").textContent = "failed: " + e.message;
+    }
+    btn.disabled = false;
   });
 
   log("cockpit ready · waiting for launch", "dim");

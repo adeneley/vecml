@@ -19,6 +19,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 
 from vecml.train.loop import TrainConfig, Trainer
+from vecml.watch import infer as infer_mod
 
 STATIC = Path(__file__).parent / "static"
 
@@ -179,6 +180,36 @@ def create_app(defaults: dict, readonly: bool = False, autostart: bool = False) 
             return JSONResponse({"error": "read-only cockpit"}, status_code=403)
         runner.stop()
         return JSONResponse({"ok": True})
+
+    # --- run tab: checkpoint listing + single-image inference -------------
+    # Deliberately allowed in readonly mode: inference mutates nothing.
+
+    @app.get("/ckpts")
+    def ckpts() -> JSONResponse:
+        return JSONResponse(infer_mod.list_ckpts())
+
+    @app.post("/infer")
+    async def do_infer(request: Request) -> JSONResponse:
+        import base64 as b64mod
+        import io
+
+        from PIL import Image
+
+        try:
+            body = await request.json()
+            ckpt = Path(body["ckpt"]).resolve()
+            runs_root = Path("runs").resolve()
+            if not ckpt.is_relative_to(runs_root) or ckpt.suffix != ".pt":
+                return JSONResponse({"error": "checkpoint outside runs/"}, status_code=400)
+            raw = body["image"].split(",", 1)[-1]  # accept raw b64 or data URL
+            img = Image.open(io.BytesIO(b64mod.b64decode(raw)))
+        except Exception as exc:  # noqa: BLE001 - surface bad uploads to the UI
+            return JSONResponse({"error": f"bad request: {exc}"}, status_code=400)
+        try:
+            result = await asyncio.to_thread(infer_mod.run, ckpt, img)
+        except Exception as exc:  # noqa: BLE001 - surface inference failures too
+            return JSONResponse({"error": f"inference failed: {exc}"}, status_code=500)
+        return JSONResponse(result)
 
     return app
 
