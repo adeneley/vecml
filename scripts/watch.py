@@ -37,6 +37,9 @@ def main() -> None:
                     help="cache decoded images in RAM (skip per-epoch PNG decode)")
     ap.add_argument("--no-amp", action="store_true",
                     help="disable bf16 autocast on CUDA")
+    ap.add_argument("--from-bench", default=None,
+                    help="JSON from bench.py --emit; overrides batch/workers/amp "
+                         "and sqrt-scales LR with the batch size")
     ap.add_argument("--port", type=int, default=7300)
     ap.add_argument("--host", default="127.0.0.1",
                     help="bind address (0.0.0.0 for remote pods behind a proxy)")
@@ -61,6 +64,20 @@ def main() -> None:
         "cache_ram": args.cache,
         "amp": not args.no_amp,
     }
+    if args.from_bench:
+        import json
+        import math
+
+        winner = json.loads(open(args.from_bench).read())
+        defaults["batch_size"] = winner["batch_size"]
+        defaults["num_workers"] = winner["num_workers"]
+        defaults["amp"] = winner["amp"]
+        # sqrt scaling (gentler than linear; safer for Adam) vs the batch-8
+        # baseline every historical run used.
+        defaults["lr"] = 3e-4 * math.sqrt(winner["batch_size"] / 8)
+        print(f"bench winner applied: batch {winner['batch_size']}, "
+              f"workers {winner['num_workers']}, amp {winner['amp']}, "
+              f"lr {defaults['lr']:.2e} ({winner.get('img_s', '?')} img/s measured)")
     app = create_app(defaults, readonly=args.readonly, autostart=args.autostart)
 
     url = f"http://127.0.0.1:{args.port}"

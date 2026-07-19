@@ -91,6 +91,8 @@ def main():
     ap.add_argument("--steps", type=int, default=30)
     ap.add_argument("--warmup", type=int, default=8)
     ap.add_argument("--quick", action="store_true", help="smaller sweep grid")
+    ap.add_argument("--emit", default=None,
+                    help="write the winning config as JSON here (for watch.py --from-bench)")
     args = ap.parse_args()
 
     device = pick_device()
@@ -131,7 +133,21 @@ def main():
         print(f"\nbaseline (batch 8, workers 0, no amp): {base[3]['img_s']:.1f} img/s")
         print(f"winner: batch {best[0]}, workers {best[1]}, amp {best[2]} "
               f"-> {best[3]['img_s']:.1f} img/s ({speedup:.2f}x)")
-        print("reminder: scale LR with batch (linear rule vs the batch-8 baseline).")
+        print("reminder: LR is scaled with batch automatically by --from-bench (sqrt rule).")
+        if args.emit:
+            import json
+
+            winner = {
+                "batch_size": best[0],
+                "num_workers": best[1],
+                "amp": best[2],
+                "img_s": round(best[3]["img_s"], 1),
+                "speedup": round(speedup, 2),
+                "device": device,
+            }
+            Path(args.emit).parent.mkdir(parents=True, exist_ok=True)
+            Path(args.emit).write_text(json.dumps(winner, indent=2))
+            print(f"winner written to {args.emit}")
 
 
 if __name__ == "__main__":
