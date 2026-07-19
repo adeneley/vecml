@@ -123,7 +123,10 @@ read -r -d '' BODY <<JSON || true
     "REPO_URL": "https://github.com/adeneley/vecml.git",
     "REPO_REF": "${REPO_REF}",
     "JOB_CMD": "${JOB_CMD}",
-    "VOL_ROOT": "${VOL_ROOT}"
+    "VOL_ROOT": "${VOL_ROOT}",
+    "GIT_CONFIG_COUNT": "1",
+    "GIT_CONFIG_KEY_0": "safe.directory",
+    "GIT_CONFIG_VALUE_0": "*"
   }
 }
 JSON

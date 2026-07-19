@@ -106,3 +106,12 @@ answer to 16 (880 img/s, 2.03x). Two processes sharing the card aggregate to
 compile_mode; flight.py and watch.py --from-bench apply them from a
 perflab.json winner. Re-run perflab when the model grows: every one of these
 numbers is model-size dependent.
+
+## 13. Cross-image pods trip git's dubious-ownership check on the volume repo
+The CPU image's uid differs from the GPU image's that created /workspace/repo;
+every git command then dies with "detected dubious ownership" and startup
+crash-loops before the job runs (first hit: the corpus data pod, 19 Jul).
+**Fixes (durable):** startup.sh marks REPO_DIR safe before git ops (needs an
+image rebuild to land), and deploy.sh injects GIT_CONFIG_COUNT/KEY_0=
+safe.directory/VALUE_0=* into the pod env - git reads config from env, so
+already-pulled images are fixed with zero rebuild.

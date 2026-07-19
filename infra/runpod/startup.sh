@@ -44,6 +44,11 @@ exec > >(tee -a "${LOG_FILE}") 2>&1
 log "run=${RUN_NAME} ref=${REPO_REF} vol=${VOL_ROOT}"
 
 # 2. Clone or update the repo (on the volume, so it persists across re-runs).
+# The volume checkout may have been created by a pod whose uid differs from
+# ours (GPU vs CPU images); without this every git command dies with
+# "detected dubious ownership" and startup crash-loops before the job runs.
+git config --global --add safe.directory "${REPO_DIR}"
+
 if [ -d "${REPO_DIR}/.git" ]; then
   log "updating existing checkout at ${REPO_DIR}"
   git -C "${REPO_DIR}" remote set-url origin "${REPO_URL}"
