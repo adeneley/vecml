@@ -374,19 +374,6 @@ class Trainer:
 
                 if pend_steps >= cfg.sync_every:
                     flush_pending()
-                    if loss_val < self.best_loss:
-                        self.best_loss = loss_val
-                        torch.save(
-                            {
-                                "model": model.state_dict(),
-                                "step": global_step,
-                                "epoch": epoch,
-                                "loss": loss_val,
-                                "params": self.params,
-                                "n_classes": cfg.n_classes,
-                            },
-                            ckpt_dir / "best.pt",
-                        )
 
                 now = time.perf_counter()
                 first = global_step == 1  # wake the UI on the very first step
@@ -445,6 +432,25 @@ class Trainer:
                 model.train()
                 val_mean = v_sum / max(v_items, 1)
                 val_acc = v_correct / v_pix if v_pix else None
+            # Checkpoint policy: best is judged once per epoch on the held-out
+            # mean (epoch mean when no val split), never on a lucky single
+            # batch - a per-step minimum once froze best.pt at epoch 162 of a
+            # 300-epoch run. last.pt always tracks the newest weights.
+            criterion = val_mean if val_mean is not None else epoch_mean
+            payload = {
+                "model": model.state_dict(),
+                "step": global_step,
+                "epoch": epoch,
+                "loss": criterion,
+                "val_mean": val_mean,
+                "val_acc": val_acc,
+                "params": self.params,
+                "n_classes": cfg.n_classes,
+            }
+            torch.save(payload, ckpt_dir / "last.pt")
+            if criterion < self.best_loss:
+                self.best_loss = criterion
+                torch.save(payload, ckpt_dir / "best.pt")
             # Final per-epoch mean point (the exit-criterion line on the chart).
             self._emit(
                 {

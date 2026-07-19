@@ -27,7 +27,7 @@ from PIL import Image
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from vecml.data.pairs import list_sample_dirs  # noqa: E402
-from vecml.models.unet import UNet  # noqa: E402
+from vecml.models.unet import DualHead, UNet  # noqa: E402
 
 RUST = "/Users/aden/development/vectorizer/target/release/vectorize"
 
@@ -90,9 +90,15 @@ def main():
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
 
-    model = UNet()
     state = torch.load(args.ckpt, map_location="cpu")
-    model.load_state_dict(state["model"])
+    sd = state["model"]
+    n_classes = state.get("n_classes", 0)
+    has_labels = any(k.startswith("head.label") for k in sd)
+    if has_labels:
+        model = UNet(head=lambda c: DualHead(c, n_classes))
+    else:
+        model = UNet()
+    model.load_state_dict(sd)
     model.eval()
 
     rows = []
@@ -102,19 +108,39 @@ def main():
 
         with torch.no_grad():
             x = torch.from_numpy(wrecked).permute(2, 0, 1)[None]
-            pred = model(x)[0].permute(1, 2, 0).clamp(0, 1).numpy()
+            outp = model(x)
+        flat = None
+        if has_labels:
+            pred = outp["rgb"][0].permute(1, 2, 0).clamp(0, 1).numpy()
+            labels = outp["logits"][0].argmax(0).numpy()
+            # Flatten: paint each label region with the median colour the RGB
+            # head predicted for it. Zero anti-aliasing, hard edges - the
+            # input format the engines can't get from a raster any other way.
+            flat = np.empty_like(pred)
+            for slot in np.unique(labels):
+                mask = labels == slot
+                flat[mask] = np.median(pred[mask], axis=0)
+        else:
+            pred = outp[0].permute(1, 2, 0).clamp(0, 1).numpy()
 
         img_dir = out / d.name
         img_dir.mkdir(exist_ok=True)
         Image.fromarray((pred * 255).astype(np.uint8)).save(img_dir / "cleaned.png")
+        if flat is not None:
+            Image.fromarray((flat * 255).astype(np.uint8)).save(img_dir / "flat.png")
 
         row = {"name": d.name,
                "damage": de(wrecked, clean),
                "cleanup": de(pred, clean)}
+        if flat is not None:
+            row["cleanup_flat"] = de(flat, clean)
 
+        variants = [("raw", d / "wrecked_00.png"),
+                    ("relay", img_dir / "cleaned.png")]
+        if flat is not None:
+            variants.append(("flat", img_dir / "flat.png"))
         for eng, fn in ((e, ENGINES[e]) for e in args.engines):
-            for label, src in (("raw", d / "wrecked_00.png"),
-                               ("relay", img_dir / "cleaned.png")):
+            for label, src in variants:
                 svg = img_dir / f"{eng}_{label}.svg"
                 try:
                     fn(src, svg)
@@ -133,10 +159,12 @@ def main():
         return {"mean": float(np.mean(vals)), "n": len(vals)} if vals else None
 
     summary = {"ckpt": args.ckpt, "n_images": len(rows),
-               "damage": agg("damage"), "cleanup": agg("cleanup")}
+               "damage": agg("damage"), "cleanup": agg("cleanup"),
+               "cleanup_flat": agg("cleanup_flat")}
     for e in args.engines:
         summary[f"{e}_raw"] = agg(f"{e}_raw")
         summary[f"{e}_relay"] = agg(f"{e}_relay")
+        summary[f"{e}_flat"] = agg(f"{e}_flat")
     (out / "summary.json").write_text(json.dumps({"summary": summary, "rows": rows}, indent=2))
     print(json.dumps(summary, indent=2))
 

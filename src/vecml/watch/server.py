@@ -143,6 +143,8 @@ def create_app(
 
         def publish_and_log(event: dict) -> None:
             _publish(event)
+            if event.get("type") == "sample":
+                return  # base64 PNGs at 1/s made one run's log 1.76GB
             try:
                 log_file.write(json.dumps(event) + "\n")
             except Exception:  # telemetry loss must never kill training
