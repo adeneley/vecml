@@ -349,7 +349,8 @@
   const runBtn = $("run"), pill = $("pill");
   let running = false, best = Infinity;
   const losses = [];  // {step, loss, epoch, epoch_mean, lr}
-  const TARGET = 0.003;
+  let TARGET = 0.003;      // overwritten by the run's status event
+  let MAX_EPOCHS = null;   // ditto; epoch stat shows "n / max" when known
 
   // --- smooth client-side clock + img/s glide ---
   // The server emits elapsed_s / img_per_s at intervals; the UI interpolates
@@ -556,9 +557,9 @@
     }
     ctx.textAlign = "left";
 
-    // target reference line
+    // target reference line (a target of 0 means "run all epochs": no line)
     const ty = sy(TARGET);
-    if (ty >= padT && ty <= padT + plotH) {
+    if (TARGET > 0 && ty >= padT && ty <= padT + plotH) {
       ctx.save();
       ctx.strokeStyle = "#9a6700"; ctx.setLineDash([5, 4]); ctx.lineWidth = 1.2;
       ctx.beginPath(); ctx.moveTo(padL, ty); ctx.lineTo(w - padR, ty); ctx.stroke();
@@ -700,6 +701,7 @@
   let curRun = null, maxSeq = -1;
   function resetRunView() {
     best = Infinity; losses.length = 0; hoverX = null;
+    TARGET = 0.003; MAX_EPOCHS = null;  // next run's status event re-supplies
     clockBase = 0; clockAt = 0; ipsInit = false; ipsShown = 0; ipsTarget = 0;
     $("s_best").textContent = "—"; $("s_emean").textContent = "—"; $("s_lr").textContent = "—";
     draw();
@@ -717,12 +719,15 @@
       setState(ev.state, ev.detail);
       if (ev.detail && ev.detail.indexOf("device=") === 0)
         $("s_device").textContent = ev.detail.slice(7);
+      if (ev.max_epochs != null) MAX_EPOCHS = ev.max_epochs;
+      if (ev.target_loss != null) { TARGET = ev.target_loss; draw(); }
       log("[status] " + ev.state + (ev.detail ? " - " + ev.detail : ""),
           ev.state === "error" ? "err" : (ev.state === "finished" ? "ok" : "dim"));
     } else if (ev.type === "metric") {
       document.body.classList.remove("idle");
       $("s_step").textContent = ev.step;
-      $("s_epoch").textContent = ev.epoch;
+      $("s_epoch").textContent =
+        MAX_EPOCHS != null ? ev.epoch + " / " + MAX_EPOCHS : ev.epoch;
       if (ev.gpu_util != null) {
         $("s_device").textContent = "cuda · " + Math.round(ev.gpu_util) + "%"
           + (ev.gpu_mem_gb != null ? " · " + ev.gpu_mem_gb + "G" : "");

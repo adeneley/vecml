@@ -215,6 +215,10 @@ class Trainer:
                 "type": "status",
                 "state": "running",
                 "detail": f"device={self.device}",
+                # Exit conditions, so the cockpit can show how/when the run
+                # will stop (first one hit wins).
+                "max_epochs": cfg.max_epochs,
+                "target_loss": cfg.target_loss,
             }
         )
 
