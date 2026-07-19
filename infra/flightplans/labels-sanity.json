@@ -1,0 +1,14 @@
+{
+  "comment": "Sanity-only: 40 epochs of the Run A config on the compiled 2x recipe. Yardstick = runs/labels-10k-a/epochs-0-39.json (val 0.0094, acc 95.1% at epoch 39). Clears the recipe to carry the real probe runs.",
+  "runs": [
+    {
+      "name": "labels-sanity-2x",
+      "data_root": "/tmp/data/train-10k",
+      "n": 10000,
+      "val_n": 500,
+      "n_classes": 16,
+      "max_epochs": 40,
+      "cache_ram": true
+    }
+  ]
+}
