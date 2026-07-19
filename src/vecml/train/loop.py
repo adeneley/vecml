@@ -30,7 +30,20 @@ from torch import nn
 from torch.utils.data import DataLoader
 
 from vecml.data.pairs import PairsDataset
-from vecml.models.unet import UNet, count_params
+from vecml.models.unet import DualHead, UNet, count_params
+
+# Fixed distinct colours for label-map thumbnails (slot 0 = background).
+# Deliberately NOT the image's own palette: slot-splitting mistakes are
+# invisible if two slots happen to render in similar colours.
+LABEL_COLOURS = np.array(
+    [
+        [255, 255, 255], [17, 17, 17], [214, 39, 40], [44, 160, 44],
+        [31, 119, 180], [255, 127, 14], [148, 103, 189], [23, 190, 207],
+        [227, 119, 194], [188, 189, 34], [140, 86, 75], [127, 127, 127],
+        [174, 199, 232], [255, 152, 150], [152, 223, 138], [197, 176, 213],
+    ],
+    dtype=np.uint8,
+)
 
 EventSink = Callable[[dict], None]
 
@@ -49,6 +62,17 @@ def _tensor_to_b64_png(chw: torch.Tensor, size: int) -> str:
     arr = (chw.clamp(0, 1).mul(255).round().to(torch.uint8).cpu().numpy())
     arr = np.transpose(arr, (1, 2, 0))  # HWC
     img = Image.fromarray(arr, mode="RGB")
+    if img.size != (size, size):
+        img = img.resize((size, size), Image.NEAREST)
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return base64.b64encode(buf.getvalue()).decode("ascii")
+
+
+def _labels_to_b64_png(idx_hw: torch.Tensor, size: int) -> str:
+    """Encode an HW int label map as a base64 PNG via the fixed colour table."""
+    arr = idx_hw.cpu().numpy().clip(0, len(LABEL_COLOURS) - 1)
+    img = Image.fromarray(LABEL_COLOURS[arr], mode="RGB")
     if img.size != (size, size):
         img = img.resize((size, size), Image.NEAREST)
     buf = io.BytesIO()
@@ -79,6 +103,13 @@ class TrainConfig:
     # Held-out validation: the LAST val_n of the selected dirs never train;
     # a val pass runs each epoch and val_mean rides the epoch_end metric.
     val_n: int = 0
+    # Label-map head: 0 = RGB-only (v0 behaviour). When set, the model grows
+    # a K-way classification head, pairs with >K palette colours are dropped,
+    # and the loss becomes L1(rgb) + label_loss_w * CrossEntropy(labels).
+    # The chart/target-loss "loss" stays the L1 component so runs remain
+    # comparable across modes.
+    n_classes: int = 0
+    label_loss_w: float = 0.25
     extra: dict = field(default_factory=dict)
 
 
@@ -132,7 +163,11 @@ class Trainer:
         )
 
         dataset = PairsDataset(
-            cfg.data_root, n=cfg.n, size=cfg.size, variant=cfg.variant
+            cfg.data_root,
+            n=cfg.n,
+            size=cfg.size,
+            variant=cfg.variant,
+            n_classes=cfg.n_classes or None,
         )
         val_n = min(cfg.val_n, max(len(dataset) - 1, 0))
         if val_n > 0:
@@ -151,7 +186,10 @@ class Trainer:
             drop_last=False,
         )
 
-        model = UNet().to(self.device)
+        if cfg.n_classes:
+            model = UNet(head=lambda c: DualHead(c, cfg.n_classes)).to(self.device)
+        else:
+            model = UNet().to(self.device)
         self.params = count_params(model)
         optim = torch.optim.Adam(model.parameters(), lr=cfg.lr)
         # Cosine decay from lr down to ~lr/20 over the whole run, stepped once
@@ -160,6 +198,7 @@ class Trainer:
             optim, T_max=max(cfg.max_epochs, 1), eta_min=cfg.lr / 20.0
         )
         loss_fn = nn.L1Loss()
+        ce_fn = nn.CrossEntropyLoss() if cfg.n_classes else None
 
         # Fixed items for the live sample views: drawn from the held-out split
         # when one exists (so the 4-up shows images the model never trains on).
@@ -185,16 +224,24 @@ class Trainer:
             epoch_items = 0
             model.train()
 
-            for x, y in loader:
+            for batch in loader:
                 if self._stop.is_set():
                     stopped = True
                     break
 
-                x = x.to(self.device)  # plain transfer, never non_blocking
-                y = y.to(self.device)
+                x = batch[0].to(self.device)  # plain transfer, never non_blocking
+                y = batch[1].to(self.device)
+                lab = batch[2].to(self.device) if ce_fn is not None else None
 
-                pred = model(x)
-                loss = loss_fn(pred, y)
+                out = model(x)
+                ce_val = None
+                if ce_fn is not None:
+                    l1 = loss_fn(out["rgb"], y)
+                    ce = ce_fn(out["logits"], lab)
+                    loss = l1 + cfg.label_loss_w * ce
+                    ce_val = float(ce.detach().to("cpu").item())
+                else:
+                    l1 = loss = loss_fn(out, y)
 
                 optim.zero_grad()
                 loss.backward()
@@ -203,7 +250,9 @@ class Trainer:
                 global_step += 1
                 bs = x.shape[0]
                 window_imgs += bs
-                loss_val = float(loss.detach().to("cpu").item())
+                # The chart/target "loss" is always the L1 component so label
+                # and RGB-only runs stay comparable on the same axis.
+                loss_val = float(l1.detach().to("cpu").item())
                 epoch_loss_sum += loss_val * bs
                 epoch_items += bs
 
@@ -216,6 +265,7 @@ class Trainer:
                             "epoch": epoch,
                             "loss": loss_val,
                             "params": self.params,
+                            "n_classes": cfg.n_classes,
                         },
                         ckpt_dir / "best.pt",
                     )
@@ -231,6 +281,7 @@ class Trainer:
                             "epoch": epoch,
                             "loss": loss_val,
                             "epoch_mean": epoch_loss_sum / max(epoch_items, 1),
+                            "loss_ce": ce_val,
                             "lr": optim.param_groups[0]["lr"],
                             "img_per_s": window_imgs / dt,
                             "elapsed_s": now - start,
@@ -249,18 +300,28 @@ class Trainer:
 
             epoch_mean = epoch_loss_sum / max(epoch_items, 1)
             val_mean = None
+            val_acc = None
             if val_loader is not None:
                 model.eval()
                 v_sum, v_items = 0.0, 0
+                v_correct, v_pix = 0, 0
                 with torch.no_grad():
-                    for vx, vy in val_loader:
-                        vx = vx.to(self.device)  # plain transfer
-                        vy = vy.to(self.device)
-                        v_loss = loss_fn(model(vx), vy)
+                    for vbatch in val_loader:
+                        vx = vbatch[0].to(self.device)  # plain transfer
+                        vy = vbatch[1].to(self.device)
+                        vout = model(vx)
+                        if ce_fn is not None:
+                            v_loss = loss_fn(vout["rgb"], vy)
+                            vlab = vbatch[2].to(self.device)
+                            v_correct += int((vout["logits"].argmax(1) == vlab).sum().item())
+                            v_pix += int(vlab.numel())
+                        else:
+                            v_loss = loss_fn(vout, vy)
                         v_sum += float(v_loss.item()) * vx.shape[0]
                         v_items += vx.shape[0]
                 model.train()
                 val_mean = v_sum / max(v_items, 1)
+                val_acc = v_correct / v_pix if v_pix else None
             # Final per-epoch mean point (the exit-criterion line on the chart).
             self._emit(
                 {
@@ -270,6 +331,7 @@ class Trainer:
                     "loss": loss_val,
                     "epoch_mean": epoch_mean,
                     "val_mean": val_mean,
+                    "val_acc": val_acc,
                     "epoch_end": True,
                     "lr": optim.param_groups[0]["lr"],
                     "elapsed_s": time.perf_counter() - start,
@@ -302,29 +364,39 @@ class Trainer:
     def _emit_sample(
         self,
         model: nn.Module,
-        val_items: list[tuple[torch.Tensor, torch.Tensor]],
+        val_items: list[tuple[torch.Tensor, ...]],
         step: int,
     ) -> None:
         """Run the fixed val items (one batched forward) and emit thumbnails.
 
         Event stays additive: input/pred/target are item 0 (the original
         single-triptych contract); `items` carries every val item for the
-        multi-sample view.
+        multi-sample view; label-mode items additionally carry
+        pred_labels/target_labels colourised via the fixed table.
         """
         was_training = model.training
         model.eval()
         with torch.no_grad():
-            xs = torch.stack([x for x, _ in val_items]).to(self.device)  # plain transfer
-            preds = model(xs).to("cpu")  # plain transfer back
+            xs = torch.stack([it[0] for it in val_items]).to(self.device)  # plain transfer
+            out = model(xs)
+            if isinstance(out, dict):
+                preds = out["rgb"].to("cpu")  # plain transfer back
+                pred_labs = out["logits"].argmax(1).to("cpu")
+            else:
+                preds = out.to("cpu")  # plain transfer back
+                pred_labs = None
         if was_training:
             model.train()
         size = self.cfg.sample_size
-        items = [
-            {
-                "input": _tensor_to_b64_png(x, size),
+        items = []
+        for i, it in enumerate(val_items):
+            entry = {
+                "input": _tensor_to_b64_png(it[0], size),
                 "pred": _tensor_to_b64_png(preds[i], size),
-                "target": _tensor_to_b64_png(y, size),
+                "target": _tensor_to_b64_png(it[1], size),
             }
-            for i, (x, y) in enumerate(val_items)
-        ]
+            if pred_labs is not None:
+                entry["pred_labels"] = _labels_to_b64_png(pred_labs[i], size)
+                entry["target_labels"] = _labels_to_b64_png(it[2], size)
+            items.append(entry)
         self._emit({"type": "sample", "step": step, **items[0], "items": items})

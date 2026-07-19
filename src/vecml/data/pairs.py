@@ -6,7 +6,11 @@ Each sample dir (named by SVG sha) holds, per the pipeline contract:
   labels.png      answer-key indices (unused here; this dataset is RGB->RGB)
   meta.json       recipe/qc metadata
 
-An item is (wrecked_rgb, clean_rgb), both float32 CHW in [0, 1].
+An item is (wrecked_rgb, clean_rgb), both float32 CHW in [0, 1]. With
+n_classes set, items grow a third element: the label map as int64 HW, indices
+remapped to a deterministic slot order (background = 0, remaining palette
+colours darkest to lightest) so the classifier sees consistent numbering
+regardless of how the generator happened to order the palette.
 
 Overfit mode (the default here) is deterministic: the first N dirs sorted by
 name, one fixed variant each, no augmentation. Dirs flagged in
@@ -52,6 +56,33 @@ def list_sample_dirs(root: str | Path, skip_flagged: bool = True) -> list[Path]:
     return dirs
 
 
+def _luminance(rgb: list[int]) -> float:
+    return 0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2]
+
+
+def _label_lut(palette_path: Path, n_classes: int) -> np.ndarray:
+    """Old palette index -> deterministic slot (bg=0, then dark->light)."""
+    pal = json.loads(palette_path.read_text())
+    palette, bg = pal["palette"], pal.get("background_index", 0)
+    order = sorted(
+        (i for i in range(len(palette)) if i != bg),
+        key=lambda i: (_luminance(palette[i]), palette[i]),
+    )
+    lut = np.zeros(max(len(palette), 256), dtype=np.int64)
+    for slot, i in enumerate(order, start=1):
+        lut[i] = min(slot, n_classes - 1)
+    return lut
+
+
+def _load_labels(d: Path, size: int | None, n_classes: int) -> torch.Tensor:
+    img = Image.open(d / "labels.png")
+    if size is not None and img.size != (size, size):
+        img = img.resize((size, size), Image.NEAREST)
+    arr = np.asarray(img, dtype=np.int64)
+    lut = _label_lut(d / "palette.json", n_classes)
+    return torch.from_numpy(lut[np.clip(arr, 0, len(lut) - 1)])
+
+
 def _load_rgb(path: Path, size: int | None) -> torch.Tensor:
     """Load a PNG as float32 CHW tensor in [0, 1], optionally resized square."""
     img = Image.open(path).convert("RGB")
@@ -76,6 +107,9 @@ class PairsDataset(Dataset):
         Which wrecked variant index to use per dir (deterministic).
     skip_flagged:
         Drop dirs listed in _audit_summary.json flagged_names.
+    n_classes:
+        When set, items are (wrecked, clean, labels) and dirs whose palette
+        exceeds n_classes colours (or lack label files) are dropped.
     """
 
     def __init__(
@@ -85,16 +119,30 @@ class PairsDataset(Dataset):
         size: int | None = 256,
         variant: int = 0,
         skip_flagged: bool = True,
+        n_classes: int | None = None,
     ):
         self.root = Path(root)
         self.size = size
         self.variant = variant
+        self.n_classes = n_classes
         dirs = list_sample_dirs(self.root, skip_flagged=skip_flagged)
+        if n_classes is not None:
+            dirs = [d for d in dirs if self._labels_ok(d, n_classes)]
         if n is not None:
             dirs = dirs[:n]
         if not dirs:
             raise ValueError(f"no usable sample dirs under {self.root}")
         self.dirs = dirs
+
+    @staticmethod
+    def _labels_ok(d: Path, n_classes: int) -> bool:
+        pal_path = d / "palette.json"
+        if not (d / "labels.png").exists() or not pal_path.exists():
+            return False
+        try:
+            return len(json.loads(pal_path.read_text())["palette"]) <= n_classes
+        except (json.JSONDecodeError, KeyError):
+            return False
 
     def _wrecked_path(self, d: Path) -> Path:
         """The chosen wrecked variant, clamped to what the dir actually has."""
@@ -105,8 +153,10 @@ class PairsDataset(Dataset):
     def __len__(self) -> int:
         return len(self.dirs)
 
-    def __getitem__(self, i: int) -> tuple[torch.Tensor, torch.Tensor]:
+    def __getitem__(self, i: int) -> tuple[torch.Tensor, ...]:
         d = self.dirs[i]
         wrecked = _load_rgb(self._wrecked_path(d), self.size)
         clean = _load_rgb(d / "clean.png", self.size)
-        return wrecked, clean
+        if self.n_classes is None:
+            return wrecked, clean
+        return wrecked, clean, _load_labels(d, self.size, self.n_classes)

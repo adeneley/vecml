@@ -197,6 +197,7 @@
       <h2 id="tri_title">live sample &mdash; input | prediction | target</h2>
       <span class="grow"></span>
       <button class="toggle" id="t_multi" title="show 4 validation samples, prediction vs target">4-up</button>
+      <button class="toggle" id="t_lab" title="show the label-map head: predicted regions vs answer key" hidden>labels</button>
       <span class="cap" id="tri_cap">no sample yet</span>
     </div>
     <div class="frames quad" id="frames4" hidden>
@@ -296,6 +297,7 @@
   let ema = localStorage.getItem("vecml_ema") !== "0"; // default on
   let showEm = localStorage.getItem("vecml_em") === "1"; // default off
   let multi = localStorage.getItem("vecml_multi") === "1"; // 4-up sample view
+  let labView = localStorage.getItem("vecml_lab") === "1"; // label-map channel
   let lastSampleEv = null;
   let hoverX = null;
 
@@ -579,6 +581,10 @@
   function renderSample() {
     const ev = lastSampleEv;
     if (!ev) return;
+    const first = (ev.items || [])[0];
+    const hasLab = !!(first && first.pred_labels);
+    $("t_lab").hidden = !hasLab;
+    const useLab = labView && hasLab;
     if (multi) {
       const items = ev.items || [];
       if (!items.length) {
@@ -586,13 +592,13 @@
         return;
       }
       items.slice(0, 4).forEach((it, i) => {
-        showSample("m_p" + i, "ph_p" + i, it.pred);
-        showSample("m_t" + i, "ph_t" + i, it.target);
+        showSample("m_p" + i, "ph_p" + i, useLab ? it.pred_labels : it.pred);
+        showSample("m_t" + i, "ph_t" + i, useLab ? it.target_labels : it.target);
       });
     } else {
       showSample("f_in", "ph_in", ev.input);
-      showSample("f_pred", "ph_pred", ev.pred);
-      showSample("f_tgt", "ph_tgt", ev.target);
+      showSample("f_pred", "ph_pred", useLab ? first.pred_labels : ev.pred);
+      showSample("f_tgt", "ph_tgt", useLab ? first.target_labels : ev.target);
     }
     $("tri_cap").textContent = "step " + ev.step;
   }
@@ -653,6 +659,7 @@
     $("t_ema").classList.toggle("on", ema);
     $("t_em").classList.toggle("on", showEm);
     $("t_multi").classList.toggle("on", multi);
+    $("t_lab").classList.toggle("on", labView);
   }
   $("t_log").addEventListener("click", () => {
     logY = !logY; localStorage.setItem("vecml_logy", logY ? "1" : "0"); syncToggles(); draw();
@@ -666,6 +673,10 @@
   $("t_multi").addEventListener("click", () => {
     multi = !multi; localStorage.setItem("vecml_multi", multi ? "1" : "0");
     syncToggles(); syncSampleView(); renderSample();
+  });
+  $("t_lab").addEventListener("click", () => {
+    labView = !labView; localStorage.setItem("vecml_lab", labView ? "1" : "0");
+    syncToggles(); renderSample();
   });
   $("t_clear").addEventListener("click", () => { $("log").innerHTML = ""; });
   syncToggles();

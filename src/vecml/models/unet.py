@@ -56,6 +56,28 @@ class RGBHead(nn.Module):
         return torch.sigmoid(self.proj(x))
 
 
+class DualHead(nn.Module):
+    """RGB regression + K-way label-map logits from the shared features.
+
+    The RGB branch keeps the cleanup task (and doubles as the colour oracle
+    for predicted regions); the label branch is the paint-by-numbers head.
+    Logits are returned raw: CrossEntropyLoss wants them unsoftmaxed, and the
+    softmax probabilities at region boundaries carry sub-pixel edge position
+    that the engine will eventually want, so nothing here may argmax early.
+    """
+
+    out_channels = 3
+
+    def __init__(self, in_ch: int, n_classes: int = 16):
+        super().__init__()
+        self.n_classes = n_classes
+        self.rgb = nn.Conv2d(in_ch, 3, 1)
+        self.label = nn.Conv2d(in_ch, n_classes, 1)
+
+    def forward(self, x: torch.Tensor) -> dict[str, torch.Tensor]:
+        return {"rgb": torch.sigmoid(self.rgb(x)), "logits": self.label(x)}
+
+
 class UNet(nn.Module):
     """Encoder 32->64->128, bottleneck 256, symmetric decoder with skips.
 
