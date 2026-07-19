@@ -134,3 +134,19 @@ prefixed with `export PATH=/root/.local/bin:$PATH;`.
     Old images keep working with the new lockfile (no VECML_SYNC_GROUPS ->
     default gpu group = pre-split behaviour), but deploy new-lock training
     jobs only on rebuilt images.
+
+## 16. RunPod restarts a completed job's container - and it retrains from scratch
+When the job process exits (even rc=0), RunPod's restart policy relaunches
+the container; startup.sh dutifully replays the whole flight plan. On 19 Jul
+this cost hippo-100k its weights: the run finished 16:04, the restart booted
+16:05, and its fresh epoch-0 checkpoint overwrote best.pt at 16:08:05 -
+fifteen seconds before the manual teardown landed. Val 0.00849, no relay
+eval possible, full metric history salvaged from a pre-overwrite fetch.
+**Fixes (durable, f479155):** flight.py skips any run whose events.jsonl
+already records a `"state": "finished"` status, and idles at plan end
+instead of exiting so the restart never fires at all. Restarts of data-mint
+pods are merely wasteful (they recompute into /tmp for ~35 min before
+touching the volume tarball) but get the same treatment: tear down promptly
+on completion, and give long jobs a completion watcher that harvests then
+terminates. Deliberate re-runs of a finished name: delete that run's
+events.jsonl (or rename the run).
