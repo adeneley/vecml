@@ -45,6 +45,18 @@ def main() -> int:
         run = dict(run)
         name = run.pop("name")
         run.setdefault("ckpt_dir", f"runs/{name}")
+        # RunPod restarts the container when the job process exits, and startup
+        # re-runs the whole plan. A finished run must never train again: its
+        # first checkpoint save would overwrite the completed best.pt. The
+        # event log is the durable record - a "finished" status means done.
+        ev_path = Path(run["ckpt_dir"]) / "events.jsonl"
+        if ev_path.exists():
+            with open(ev_path, errors="replace") as f:
+                if any('"state": "finished"' in ln for ln in f):
+                    print(f"[flight] {name}: already finished per events.jsonl; "
+                          f"skipping (delete the events file to force a re-run)",
+                          flush=True)
+                    continue
         if winner:
             # The recipe supplies defaults; anything the flightplan sets
             # explicitly wins (e.g. big datasets that cannot cache_ram need
@@ -96,8 +108,11 @@ def main() -> int:
         thread.join(timeout=30)
         time.sleep(3)  # free the port before the next bind
 
-    print("[flight] all runs complete", flush=True)
-    return 0
+    # Idle rather than exit: an exiting job makes RunPod restart the container
+    # and replay the plan (see the skip guard above). Teardown ends the pod.
+    print("[flight] all runs complete; idling for teardown", flush=True)
+    while True:
+        time.sleep(60)
 
 
 if __name__ == "__main__":
