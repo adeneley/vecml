@@ -9,51 +9,51 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%231f6fb2'/%3E%3Cpolyline points='5,24 12,15 18,19 27,7' fill='none' stroke='%23fff' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3Ccircle cx='27' cy='7' r='2.6' fill='%23fff'/%3E%3C/svg%3E">
 <style>
   :root {
-    color-scheme: dark;
-    /* Surfaces: a cool near-navy charcoal that echoes Desk's structural ink.
-       Cards are the lightest surface; wells/tiles/canvas step back toward the page. */
-    --bg: #0d1219;          /* app background */
-    --panel: #1b232e;       /* cards, raised chrome */
-    --panel2: #151b24;      /* sunken: stat tiles, canvas, log, inset wells */
-    --hover: #232d3a;       /* control / row hover */
-    --line: #2c3643;        /* 1px separators */
-    --line-soft: #222b37;   /* faint interior gridlines */
+    color-scheme: light;
+    /* Surfaces: Desk's warm off-white page, white cards, a sunken well a step down. */
+    --bg: #fafaf7;          /* app background */
+    --panel: #ffffff;       /* cards, raised chrome */
+    --panel2: #f5f3ef;      /* sunken: stat tiles, canvas, log, inset wells */
+    --hover: #f5f6f7;       /* control / row hover */
+    --line: #e7e5e1;        /* 1px separators */
+    --line-soft: #eeeeee;   /* faint interior gridlines */
     /* Ink */
-    --fg: #e7ecf3;          /* primary text */
-    --muted: #97a3b4;       /* secondary text */
-    --dim: #6a7688;         /* tertiary, captions, muted meta */
-    /* Azure staple (Desk #0069A8), lifted for legibility on dark */
-    --accent: #47a3e3;      /* links, active state, the loss line */
-    --accent-fill: #1c7fc4; /* filled primary button */
-    --accent-fill-hi: #2b8ed2;
-    --accent-tint: rgba(71,163,227,.15);
-    --accent2: #a98bf2;     /* epoch-mean violet */
+    --navy: #133b63;        /* structural headings */
+    --fg: #212327;          /* primary text */
+    --muted: #50565e;       /* secondary text */
+    --dim: #808893;         /* tertiary, captions, uppercase micro-labels */
+    /* Azure staple, exactly as Desk uses it */
+    --accent: #0069a8;      /* links, active state, the loss line */
+    --accent-fill: #0069a8; /* filled primary button */
+    --accent-fill-hi: #00598f;
+    --accent-tint: rgba(0,105,168,.08);
+    --accent2: #7a44cf;     /* epoch-mean violet */
     /* Status: solid on its own tint, state always carried in words */
-    --good: #45c07a;
-    --warn: #e0a53a;
-    --bad: #ec5c63;
-    --good-tint: rgba(69,192,122,.14);
-    --warn-tint: rgba(224,165,58,.15);
-    --bad-tint: rgba(236,92,99,.16);
-    --go: #2f9e59;          /* Start button fill (deeper green for white text) */
-    --go-hi: #37ac63;
+    --good: #1f7a3d;
+    --warn: #b06a00;
+    --bad: #c0341d;
+    --good-tint: rgba(31,122,61,.10);
+    --warn-tint: rgba(176,106,0,.12);
+    --bad-tint: rgba(192,52,29,.10);
+    --go: #1f7a3d;          /* Start button fill */
+    --go-hi: #1a6834;
     /* Chart palette: single source of truth, read once by the canvas renderer */
-    --chart-grid: #29323f;
-    --chart-grid-x: #1f2733;
-    --chart-axis: #8793a4;
-    --chart-loss: #47a3e3;
-    --chart-loss-faint: rgba(71,163,227,.26);
-    --chart-em: #a98bf2;
-    --chart-val: #35c2b1;
-    --chart-target: #e0a53a;
-    --chart-best: #45c07a;
-    --chart-cross: rgba(231,236,243,.34);
-    --chart-point: #e7ecf3;
-    --tip-bg: rgba(21,27,36,.97);
-    --tip-line: #33404f;
-    --tip-fg: #e7ecf3;
-    --idle-grid: rgba(151,163,180,.12);
-    --idle-fg: #6a7688;
+    --chart-grid: #dcd9d2;
+    --chart-grid-x: #ebe9e3;
+    --chart-axis: #6c7583;
+    --chart-loss: #0069a8;
+    --chart-loss-faint: rgba(0,105,168,.26);
+    --chart-em: #7a44cf;
+    --chart-val: #0e8f82;
+    --chart-target: #b06a00;
+    --chart-best: #1f7a3d;
+    --chart-cross: rgba(33,35,39,.32);
+    --chart-point: #212327;
+    --tip-bg: rgba(255,255,255,.97);
+    --tip-line: #e7e5e1;
+    --tip-fg: #212327;
+    --idle-grid: rgba(128,136,147,.14);
+    --idle-fg: #7b8492;
     /* Shape */
     --r-card: 10px;
     --r: 8px;
@@ -73,18 +73,18 @@
   }
   .logo { flex: 0 0 auto; display: inline-flex; color: var(--accent); }
   .logo svg { width: 18px; height: 18px; display: block; }
-  header h1 { font-size: 14px; margin: 0; font-weight: 600; letter-spacing: -.01em; color: var(--fg); }
+  header h1 { font-size: 14px; margin: 0; font-weight: 600; letter-spacing: -.01em; color: var(--navy); }
   header .spacer { flex: 1; }
   button#run {
     font: inherit; font-weight: 600; font-size: 13px; cursor: pointer;
     padding: 7px 22px; border-radius: var(--r); border: none; color: #fff;
-    background: var(--go); box-shadow: 0 1px 2px rgba(0,0,0,.4);
+    background: var(--go); box-shadow: 0 1px 2px rgba(0,0,0,.12);
     transition: background .15s, transform .06s, box-shadow .12s;
   }
-  button#run:hover { background: var(--go-hi); transform: translateY(-1px); box-shadow: 0 2px 6px rgba(0,0,0,.45); }
-  button#run:active { transform: translateY(0); box-shadow: 0 1px 2px rgba(0,0,0,.4); }
+  button#run:hover { background: var(--go-hi); transform: translateY(-1px); box-shadow: 0 2px 6px rgba(0,0,0,.16); }
+  button#run:active { transform: translateY(0); box-shadow: 0 1px 2px rgba(0,0,0,.12); }
   button#run.running { background: var(--bad); }
-  button#run.running:hover { background: #f06b72; }
+  button#run.running:hover { background: #a82c18; }
   button#run:disabled { opacity: .55; cursor: default; transform: none; box-shadow: none; }
   .pill {
     display: inline-flex; align-items: center; gap: 7px;
@@ -96,15 +96,15 @@
     content: ""; width: 6px; height: 6px; border-radius: 50%;
     background: currentColor; opacity: .55; flex: 0 0 auto;
   }
-  .pill.running { color: var(--accent); border-color: rgba(71,163,227,.5); background: var(--accent-tint); }
+  .pill.running { color: var(--accent); border-color: rgba(0,105,168,.5); background: var(--accent-tint); }
   .pill.running::before { opacity: 1; animation: livepulse 1.6s ease-in-out infinite; }
-  .pill.finished { color: var(--good); border-color: rgba(69,192,122,.5); background: var(--good-tint); }
+  .pill.finished { color: var(--good); border-color: rgba(31,122,61,.45); background: var(--good-tint); }
   .pill.finished::before { opacity: 1; }
-  .pill.error, .pill.stopped { color: var(--bad); border-color: rgba(236,92,99,.5); background: var(--bad-tint); }
+  .pill.error, .pill.stopped { color: var(--bad); border-color: rgba(192,52,29,.45); background: var(--bad-tint); }
   .pill.error::before, .pill.stopped::before { opacity: 1; }
   @keyframes livepulse {
-    0%, 100% { box-shadow: 0 0 0 0 rgba(71,163,227,.5); }
-    50% { box-shadow: 0 0 0 4px rgba(71,163,227,0); }
+    0%, 100% { box-shadow: 0 0 0 0 rgba(0,105,168,.5); }
+    50% { box-shadow: 0 0 0 4px rgba(0,105,168,0); }
   }
   html, body { height: 100%; overflow: hidden; }
   main {
@@ -137,7 +137,7 @@
   }
   .toggle:hover { border-color: var(--accent); color: var(--accent); background: var(--hover); }
   .toggle:active { transform: translateY(1px); }
-  .toggle.on { background: var(--accent-tint); border-color: rgba(71,163,227,.55); color: var(--accent); }
+  .toggle.on { background: var(--accent-tint); border-color: rgba(0,105,168,.55); color: var(--accent); }
   #chartWrap { grid-column: 1; grid-row: 1; }
   canvas#chart { width: 100%; flex: 1 1 auto; min-height: 0; display: block;
     background: var(--panel2); border: 1px solid var(--line); border-radius: var(--r-sm); cursor: crosshair; }
@@ -186,17 +186,17 @@
   .pair .pdiv { flex: 0 0 auto; height: 1px; background: var(--line); margin: 7px 6px; }
   .pair .htag { position: absolute; top: 4px; left: 4px; z-index: 1;
     font-size: 9px; text-transform: uppercase; letter-spacing: .06em;
-    color: var(--muted); background: rgba(13,18,25,.72);
+    color: var(--muted); background: rgba(255,255,255,.85);
     padding: 1px 5px; border-radius: 3px; pointer-events: none; }
   .pair .ph { border-width: 1px; }
   .pair .ph svg { max-width: 30px; }
   @keyframes frameflash {
-    0% { box-shadow: 0 0 0 0 rgba(71,163,227,.55); }
-    100% { box-shadow: 0 0 0 6px rgba(71,163,227,0); }
+    0% { box-shadow: 0 0 0 0 rgba(0,105,168,.55); }
+    100% { box-shadow: 0 0 0 6px rgba(0,105,168,0); }
   }
   .ph {
     width: 100%; height: 100%;
-    border: 1.5px dashed var(--line); border-radius: var(--r-sm); background: rgba(255,255,255,.02);
+    border: 1.5px dashed var(--line); border-radius: var(--r-sm); background: rgba(255,255,255,.5);
     display: flex; flex-direction: column; align-items: center; justify-content: center;
     gap: 8px; color: var(--dim);
   }
@@ -224,7 +224,7 @@
     background: transparent; color: var(--muted); padding: 4px 14px; border-radius: var(--r-sm);
     transition: color .12s, background .12s; }
   .tab:hover { color: var(--fg); }
-  .tab.on { background: var(--hover); color: var(--fg); box-shadow: 0 1px 2px rgba(0,0,0,.35); }
+  .tab.on { background: var(--hover); color: var(--fg); box-shadow: 0 1px 2px rgba(0,0,0,.1); }
   body.runview #run { display: none; }
   /* run tab */
   main.runmain { display: flex; flex-direction: column; gap: 14px;
@@ -240,7 +240,7 @@
   #drop.over { border-color: var(--accent); background: var(--accent-tint); color: var(--fg); }
   #infer_btn { font: inherit; font-weight: 600; font-size: 13px; cursor: pointer;
     padding: 7px 22px; border-radius: var(--r); border: none; color: #fff; background: var(--accent-fill);
-    box-shadow: 0 1px 2px rgba(0,0,0,.4); transition: background .15s, transform .06s; }
+    box-shadow: 0 1px 2px rgba(0,0,0,.12); transition: background .15s, transform .06s; }
   #infer_btn:hover { background: var(--accent-fill-hi); transform: translateY(-1px); }
   #infer_btn:disabled { opacity: .45; cursor: default; transform: none; box-shadow: none; }
   .rframes { flex: 1 1 auto; min-height: 0; display: grid;
@@ -257,7 +257,7 @@
     flex: 1 1 auto; min-height: 0; overflow-y: auto; background: var(--panel2);
     border: 1px solid var(--line); border-radius: var(--r-sm);
     padding: 10px 12px; font: 12px/1.5 var(--mono);
-    white-space: pre-wrap; color: #c3cdd9; font-variant-numeric: tabular-nums;
+    white-space: pre-wrap; color: #414852; font-variant-numeric: tabular-nums;
   }
   #log .err { color: var(--bad); }
   #log .ok { color: var(--good); }
@@ -494,22 +494,22 @@
   const _cs = getComputedStyle(document.documentElement);
   const CC = (name, fallback) => (_cs.getPropertyValue(name).trim() || fallback);
   const CHART = {
-    grid: CC("--chart-grid", "#29323f"),
-    gridX: CC("--chart-grid-x", "#1f2733"),
-    axis: CC("--chart-axis", "#8793a4"),
-    loss: CC("--chart-loss", "#47a3e3"),
-    lossFaint: CC("--chart-loss-faint", "rgba(71,163,227,.26)"),
-    em: CC("--chart-em", "#a98bf2"),
-    val: CC("--chart-val", "#35c2b1"),
-    target: CC("--chart-target", "#e0a53a"),
-    best: CC("--chart-best", "#45c07a"),
-    cross: CC("--chart-cross", "rgba(231,236,243,.34)"),
-    point: CC("--chart-point", "#e7ecf3"),
-    tipBg: CC("--tip-bg", "rgba(21,27,36,.97)"),
-    tipLine: CC("--tip-line", "#33404f"),
-    tipFg: CC("--tip-fg", "#e7ecf3"),
-    idleGrid: CC("--idle-grid", "rgba(151,163,180,.12)"),
-    idleFg: CC("--idle-fg", "#6a7688"),
+    grid: CC("--chart-grid", "#dcd9d2"),
+    gridX: CC("--chart-grid-x", "#ebe9e3"),
+    axis: CC("--chart-axis", "#6c7583"),
+    loss: CC("--chart-loss", "#0069a8"),
+    lossFaint: CC("--chart-loss-faint", "rgba(0,105,168,.26)"),
+    em: CC("--chart-em", "#7a44cf"),
+    val: CC("--chart-val", "#0e8f82"),
+    target: CC("--chart-target", "#b06a00"),
+    best: CC("--chart-best", "#1f7a3d"),
+    cross: CC("--chart-cross", "rgba(33,35,39,.32)"),
+    point: CC("--chart-point", "#212327"),
+    tipBg: CC("--tip-bg", "rgba(255,255,255,.97)"),
+    tipLine: CC("--tip-line", "#e7e5e1"),
+    tipFg: CC("--tip-fg", "#212327"),
+    idleGrid: CC("--idle-grid", "rgba(128,136,147,.14)"),
+    idleFg: CC("--idle-fg", "#7b8492"),
   };
   function sizeCanvas() {
     const r = cv.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
