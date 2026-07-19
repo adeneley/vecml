@@ -192,6 +192,7 @@ def main():
         ("solo: compile r-o", {"comp": True}),
         ("stack: sync+fused", {"sync": True, "fused": True}),
         ("stack: +channels_last", {"sync": True, "fused": True, "cl": True}),
+        ("stack: compile, no cl", {"sync": True, "fused": True, "comp": True}),
         ("stack: full (+compile)", {"sync": True, "fused": True, "cl": True,
                                     "comp": True}),
     ]
