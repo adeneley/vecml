@@ -73,7 +73,8 @@ def main() -> None:
         defaults["batch_size"] = winner["batch_size"]
         defaults["num_workers"] = winner["num_workers"]
         defaults["amp"] = winner["amp"]
-        for key in ("sync_every", "fused_adam", "channels_last", "compile_mode"):
+        for key in ("sync_every", "fused_adam", "channels_last", "compile_mode",
+                        "non_blocking", "cudnn_benchmark"):
             if key in winner:
                 defaults[key] = winner[key]
         # sqrt scaling (gentler than linear; safer for Adam) vs the batch-8

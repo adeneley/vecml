@@ -39,9 +39,18 @@ from vecml.train.loop import pick_device  # noqa: E402
 
 
 def measure(dataset, device, cfg, min_steps, min_seconds, warmup):
-    """One config's steady-state img/s. cfg keys: batch, sync, fused, cl, comp."""
+    """One config's steady-state img/s.
+
+    cfg keys: batch, sync, fused, cl, comp; optional push levers:
+    nb (non_blocking H2D from pinned memory, CUDA only), cudnn
+    (cudnn.benchmark autotuner), sync_n (loss-read window), mode
+    (torch.compile mode).
+    """
     batch = cfg["batch"]
     n_classes = cfg["n_classes"]
+    nb = bool(cfg.get("nb")) and device == "cuda"
+    if device == "cuda":
+        torch.backends.cudnn.benchmark = bool(cfg.get("cudnn"))
     loader = DataLoader(
         dataset, batch_size=batch, shuffle=True, num_workers=0,
         pin_memory=(device == "cuda"), drop_last=True,
@@ -66,8 +75,8 @@ def measure(dataset, device, cfg, min_steps, min_seconds, warmup):
     compile_s = None
     if cfg["comp"]:
         t_c = time.perf_counter()
-        model = torch.compile(model, mode="reduce-overhead")
-    item_every = 50 if cfg["sync"] else 1
+        model = torch.compile(model, mode=cfg.get("mode", "reduce-overhead"))
+    item_every = cfg.get("sync_n", 50) if cfg["sync"] else 1
 
     def batches():
         while True:
@@ -79,12 +88,14 @@ def measure(dataset, device, cfg, min_steps, min_seconds, warmup):
     pending = []
     for batch_data in batches():
         if cfg["cl"]:
-            x = batch_data[0].to(device, memory_format=torch.channels_last)
-            y = batch_data[1].to(device, memory_format=torch.channels_last)
+            x = batch_data[0].to(device, memory_format=torch.channels_last,
+                                 non_blocking=nb)
+            y = batch_data[1].to(device, memory_format=torch.channels_last,
+                                 non_blocking=nb)
         else:
-            x = batch_data[0].to(device)
-            y = batch_data[1].to(device)
-        lab = batch_data[2].to(device) if n_classes else None
+            x = batch_data[0].to(device, non_blocking=nb)
+            y = batch_data[1].to(device, non_blocking=nb)
+        lab = batch_data[2].to(device, non_blocking=nb) if n_classes else None
         with amp_ctx():
             out = model(x)
             if n_classes:
@@ -155,6 +166,8 @@ def main():
     ap.add_argument("--warmup", type=int, default=12)
     ap.add_argument("--smoke", action="store_true",
                     help="local plumbing check: tiny, skips CUDA-only levers")
+    ap.add_argument("--skip-duo", action="store_true",
+                    help="skip the two-process test (measured a loser 19 Jul)")
     ap.add_argument("--emit", default=None)
     # internal duo-worker plumbing
     ap.add_argument("--duo-worker", action="store_true")
@@ -238,8 +251,55 @@ def main():
     base = next((r for r in ok if r["name"].startswith("baseline")), None)
     best = max(ok, key=lambda r: r["img_s"]) if ok else None
 
-    duo = None
+    # Push phase: unexplored levers stacked on the winner so far, chasing
+    # the gap between the measured ~880 and the ~3,300 roofline.
     if cuda and not args.smoke and best is not None:
+        bb = best["cfg"]["batch"]
+        stack = {k: best["cfg"][k] for k in ("sync", "fused", "cl", "comp")}
+        push = [
+            ("push: +nb", {"nb": True}),
+            ("push: +nb +cudnn.benchmark", {"nb": True, "cudnn": True}),
+            ("push: +nb, sync 200", {"nb": True, "sync_n": 200}),
+            ("push: +nb, max-autotune", {"nb": True, "mode": "max-autotune"}),
+            ("push: +nb, no cl", {"nb": True, "cl": False}),
+        ]
+        print("\npush phase (stacked on winner so far)", flush=True)
+        for name, levers in push:
+            cfg = {**base_cfg(bb, nc), **stack, **levers}
+            try:
+                r = measure(dataset, device, cfg, args.steps, args.seconds,
+                            args.warmup)
+            except Exception as exc:
+                print(f"{name:<34} {bb:>5}    failed: {str(exc)[:80]}",
+                      flush=True)
+                rows.append({"name": name, "cfg": cfg, "error": str(exc)[:200]})
+                continue
+            rows.append({"name": name, "cfg": cfg, **r})
+            cs = f"{r['compile_s']:.0f}" if r["compile_s"] else "-"
+            pk = f"{r['peak_gb']:.1f}" if r["peak_gb"] is not None else "-"
+            print(f"{name:<34} {bb:>5} {r['img_s']:>8.1f} {pk:>8} {cs:>9}",
+                  flush=True)
+
+        # Fine batch sweep around the winner with the best push levers.
+        ok = [r for r in rows if "img_s" in r]
+        best = max(ok, key=lambda r: r["img_s"])
+        for b in (12, 24):
+            cfg = {**best["cfg"], "batch": b}
+            name = f"push winner @ batch {b}"
+            try:
+                r = measure(dataset, device, cfg, args.steps, args.seconds,
+                            args.warmup)
+            except Exception as exc:
+                rows.append({"name": name, "cfg": cfg, "error": str(exc)[:200]})
+                continue
+            rows.append({"name": name, "cfg": cfg, **r})
+            print(f"{name:<34} {b:>5} {r['img_s']:>8.1f}", flush=True)
+
+    ok = [r for r in rows if "img_s" in r]
+    best = max(ok, key=lambda r: r["img_s"]) if ok else None
+
+    duo = None
+    if cuda and not args.smoke and not args.skip_duo and best is not None:
         import tempfile
 
         print("\nduo: two processes, best solo config each", flush=True)
@@ -279,10 +339,13 @@ def main():
             "batch_size": best["cfg"]["batch"],
             "num_workers": 0,
             "amp": cuda,
-            "sync_every": 50 if best["cfg"]["sync"] else 1,
+            "sync_every": best["cfg"].get("sync_n", 50) if best["cfg"]["sync"] else 1,
             "fused_adam": best["cfg"]["fused"],
             "channels_last": best["cfg"]["cl"],
-            "compile_mode": "reduce-overhead" if best["cfg"]["comp"] else None,
+            "compile_mode": best["cfg"].get("mode", "reduce-overhead")
+            if best["cfg"]["comp"] else None,
+            "non_blocking": bool(best["cfg"].get("nb")),
+            "cudnn_benchmark": bool(best["cfg"].get("cudnn")),
             "img_s": round(best["img_s"], 1),
             "speedup_vs_faithful_baseline": round(best["img_s"] / base["img_s"], 2)
             if base else None,

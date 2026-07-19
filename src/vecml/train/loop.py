@@ -166,6 +166,11 @@ class TrainConfig:
     fused_adam: bool = False
     channels_last: bool = False
     compile_mode: str | None = None
+    # Both CUDA-only, ignored elsewhere. non_blocking must NEVER be enabled
+    # on MPS: it silently corrupts transferred tensors there (starter-model
+    # lesson); on CUDA with pinned memory it overlaps copy with compute.
+    non_blocking: bool = False
+    cudnn_benchmark: bool = False
     extra: dict = field(default_factory=dict)
 
 
@@ -266,6 +271,9 @@ class Trainer:
             model = UNet(base=cfg.base).to(self.device)
         cuda = self.device == "cuda"
         use_cl = cfg.channels_last and cuda
+        nb = cfg.non_blocking and cuda
+        if cuda and cfg.cudnn_benchmark:
+            torch.backends.cudnn.benchmark = True
         if use_cl:
             model = model.to(memory_format=torch.channels_last)
         # `model` stays the plain module for checkpoints, val and samples;
@@ -345,12 +353,13 @@ class Trainer:
                     stopped = True
                     break
 
-                x = batch[0].to(self.device)  # plain transfer, never non_blocking
-                y = batch[1].to(self.device)
+                x = batch[0].to(self.device, non_blocking=nb)
+                y = batch[1].to(self.device, non_blocking=nb)
                 if use_cl:
                     x = x.contiguous(memory_format=torch.channels_last)
                     y = y.contiguous(memory_format=torch.channels_last)
-                lab = batch[2].to(self.device) if ce_fn is not None else None
+                lab = (batch[2].to(self.device, non_blocking=nb)
+                       if ce_fn is not None else None)
 
                 with amp_ctx():
                     out = net(x)

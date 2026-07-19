@@ -51,7 +51,8 @@ def main() -> int:
             run["amp"] = winner["amp"]
             # perflab levers, when the recipe carries them (older bench.json
             # winners don't; TrainConfig defaults are the safe eager path).
-            for key in ("sync_every", "fused_adam", "channels_last", "compile_mode"):
+            for key in ("sync_every", "fused_adam", "channels_last", "compile_mode",
+                        "non_blocking", "cudnn_benchmark"):
                 if key in winner:
                     run[key] = winner[key]
             # sqrt LR scaling vs the batch-8 baseline all prior runs used.
