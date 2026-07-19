@@ -3,6 +3,8 @@
 Flags (excluded from training by PairsDataset):
   - partial dirs (no clean.png, e.g. a wreck_svg failure left debris)
   - blank renders (clean.png with near-zero variance; bad answer keys)
+  - bad answer keys (qc high_reconstruction_error / empty_labels flags):
+    harmless to the RGB head but poison for label-head training
 
   uv run python scripts/finalize_set.py --root /tmp/out/train-10k
 """
@@ -21,7 +23,7 @@ def main():
     args = ap.parse_args()
     root = Path(args.root)
 
-    flagged, partial, blanks, total = set(), 0, 0, 0
+    flagged, partial, blanks, badkeys, total = set(), 0, 0, 0, 0
     for d in sorted(root.iterdir()):
         if d.name.startswith("_") or not d.is_dir():
             continue
@@ -35,13 +37,20 @@ def main():
         if arr.std() < 1.0:
             flagged.add(d.name)
             blanks += 1
+            continue
+        meta = d / "meta.json"
+        if meta.exists():
+            qc_flags = set(json.loads(meta.read_text())["qc"]["flags"])
+            if qc_flags & {"high_reconstruction_error", "empty_labels_nonempty_render"}:
+                flagged.add(d.name)
+                badkeys += 1
 
     (root / "_audit_summary.json").write_text(
         json.dumps({"flagged_names": sorted(flagged)}, indent=2)
     )
     print(
-        f"finalized {root}: {total} dirs, {partial} partial, "
-        f"{blanks} blank, usable {total - len(flagged)}"
+        f"finalized {root}: {total} dirs, {partial} partial, {blanks} blank, "
+        f"{badkeys} bad answer keys, usable {total - len(flagged)}"
     )
 
 
