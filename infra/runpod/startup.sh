@@ -104,7 +104,10 @@ fi
 
 log "exec: ${JOB_CMD}"
 set +e
-bash -lc "${JOB_CMD}"
+# -l gives the job a login environment, but /etc/profile on some base images
+# resets PATH and drops uv (/root/.local/bin) - rc=127 with no other clue.
+# Re-export the PATH this script verified before handing over.
+bash -lc "export PATH=\"${PATH}\"; ${JOB_CMD}"
 JOB_RC=$?
 set -e
 log "job exited rc=${JOB_RC}"

@@ -115,3 +115,13 @@ crash-loops before the job runs (first hit: the corpus data pod, 19 Jul).
 image rebuild to land), and deploy.sh injects GIT_CONFIG_COUNT/KEY_0=
 safe.directory/VALUE_0=* into the pod env - git reads config from env, so
 already-pulled images are fixed with zero rebuild.
+
+## 14. bash -lc clobbers PATH on the CPU base image (rc=127, no other clue)
+startup.sh verified uv, synced deps, then ran JOB_CMD via `bash -lc` - and
+the job died instantly with rc=127. The CPU base's /etc/profile resets PATH
+in login shells, dropping /root/.local/bin where uv lives; the GPU base's
+profile doesn't, which is why every GPU pod worked. rc=127 with zero output
+= "command not found before anything could log".
+**Fixes (durable):** startup.sh re-exports its own verified PATH inside the
+login shell (next image build); until then JOB_CMDs on the CPU image are
+prefixed with `export PATH=/root/.local/bin:$PATH;`.
