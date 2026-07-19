@@ -68,8 +68,10 @@ cd "${REPO_DIR}"
 # 3. Sync deps against the warm image cache. --frozen uses the locked versions;
 #    fall back to a normal sync if the lock is absent or drifted.
 log "uv sync (warm cache at ${UV_CACHE_DIR:-default})"
-uv sync --extra dev --extra baselines --frozen \
-  || uv sync --extra dev --extra baselines
+# VECML_SYNC_GROUPS is baked into the cpu image (--no-default-groups --group
+# cpu); unset means the default gpu group, which matches pre-split images.
+uv sync --extra dev --extra baselines ${VECML_SYNC_GROUPS:-} --frozen \
+  || uv sync --extra dev --extra baselines ${VECML_SYNC_GROUPS:-}
 
 # 4. Run the job. Point job outputs at the volume by convention.
 export VECML_VOL_ROOT="${VOL_ROOT}"

@@ -45,8 +45,16 @@ WORKDIR /app
 # against. Install the main + dev + baselines groups so both eval and VTracer
 # baseline are present.
 COPY pyproject.toml uv.lock* ./
-RUN uv sync --extra dev --extra baselines --no-install-project \
-    || uv sync --extra dev --extra baselines --no-install-project --no-frozen
+# CPU wheels only: the cu128 torch layer alone is ~8GB and cost 6-7 min of
+# cold pull on every uncached fleet pod. VECML_SYNC_GROUPS keeps startup.sh's
+# boot sync on the same diet; UV_NO_SYNC stops `uv run` in JOB_CMDs from
+# re-syncing back to the default (gpu) group.
+ENV VECML_SYNC_GROUPS="--no-default-groups --group cpu" \
+    UV_NO_SYNC=1
+RUN uv sync --extra dev --extra baselines --no-default-groups --group cpu \
+        --no-install-project \
+    || uv sync --extra dev --extra baselines --no-default-groups --group cpu \
+        --no-install-project --no-frozen
 # Bootstrap script must live in the image (the repo it pulls does not exist yet
 # at container start). Copied last so a script edit is a cheap top layer.
 COPY infra/runpod/startup.sh /app/startup.sh
@@ -67,10 +75,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 WORKDIR /app
 COPY pyproject.toml uv.lock* ./
-# On the GPU base, torch/torchvision already ship CUDA-enabled. We still let uv
-# resolve the rest of the tree; if uv would replace the base torch with a CPU
-# wheel, prefer installing everything-except-torch (adjust the extra/markers in
-# pyproject before a real GPU build). Kept simple here as scaffolding.
+# The default dependency group is gpu, so a plain sync gets cu128 torch in
+# /opt/venv (independent of the base image's own torch). UV_NO_SYNC guards
+# JOB_CMD `uv run`s here the same as on cpu.
+ENV UV_NO_SYNC=1
 RUN uv sync --extra dev --extra baselines --no-install-project \
     || uv sync --extra dev --extra baselines --no-install-project --no-frozen
 COPY infra/runpod/startup.sh /app/startup.sh

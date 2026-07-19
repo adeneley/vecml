@@ -4,8 +4,6 @@ version = "0.1.0"
 description = "Neural front-end (cleanup + segmentation) for the vectorizer engine"
 requires-python = ">=3.11"
 dependencies = [
-    "torch>=2.5",
-    "torchvision",
     "numpy",
     "pillow",
     "opencv-python-headless",
@@ -22,15 +20,39 @@ dependencies = [
 dev = ["pytest", "ruff"]
 baselines = ["vtracer"]
 
+# Torch lives behind mutually-exclusive dependency GROUPS so the CPU job image
+# can take the ~200MB cpu wheels instead of ~8GB of CUDA (the cold-pull tax on
+# every uncached pod). "gpu" is the default group, so plain `uv sync`/`uv run`
+# everywhere (Mac dev, old images) behaves exactly as before the split; only
+# the CPU image opts out via --no-default-groups --group cpu.
+[dependency-groups]
+gpu = ["torch>=2.5", "torchvision"]
+cpu = ["torch>=2.5", "torchvision"]
+
+[tool.uv]
+default-groups = ["gpu"]
+conflicts = [[{ group = "cpu" }, { group = "gpu" }]]
+
 # RunPod hosts run CUDA 12.8 drivers; PyPI's newest torch is a cu130 build that
 # refuses them. Pin Linux to the cu128 index (macOS keeps PyPI torch via MPS).
 [tool.uv.sources]
-torch = [{ index = "pytorch-cu128", marker = "sys_platform == 'linux'" }]
-torchvision = [{ index = "pytorch-cu128", marker = "sys_platform == 'linux'" }]
+torch = [
+    { index = "pytorch-cu128", group = "gpu", marker = "sys_platform == 'linux'" },
+    { index = "pytorch-cpu", group = "cpu", marker = "sys_platform == 'linux'" },
+]
+torchvision = [
+    { index = "pytorch-cu128", group = "gpu", marker = "sys_platform == 'linux'" },
+    { index = "pytorch-cpu", group = "cpu", marker = "sys_platform == 'linux'" },
+]
 
 [[tool.uv.index]]
 name = "pytorch-cu128"
 url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
 explicit = true
 
 [build-system]

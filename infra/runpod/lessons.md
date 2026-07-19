@@ -125,3 +125,12 @@ profile doesn't, which is why every GPU pod worked. rc=127 with zero output
 **Fixes (durable):** startup.sh re-exports its own verified PATH inside the
 login shell (next image build); until then JOB_CMDs on the CPU image are
 prefixed with `export PATH=/root/.local/bin:$PATH;`.
+
+15. **The CPU image shipped 8GB of CUDA torch it could never use** (the
+    linux->cu128 index pin applied to every linux install), which is most of
+    why cold pulls cost 6-11 min all night on 19 Jul. Torch now lives behind
+    conflicting dependency groups (`gpu` default, `cpu` for the slim image);
+    images are built by `.github/workflows/images.yml`, never from a Mac.
+    Old images keep working with the new lockfile (no VECML_SYNC_GROUPS ->
+    default gpu group = pre-split behaviour), but deploy new-lock training
+    jobs only on rebuilt images.
