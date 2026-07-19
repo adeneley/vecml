@@ -1,0 +1,177 @@
+{
+  "rows": [
+    {
+      "name": "baseline (item/step, plain Adam)",
+      "img_s": 432.46672813748586,
+      "peak_gb": 1.772133376,
+      "compile_s": null,
+      "cfg": {
+        "batch": 8,
+        "n_classes": 16,
+        "sync": false,
+        "fused": false,
+        "cl": false,
+        "comp": false
+      }
+    },
+    {
+      "name": "solo: sync (item/50)",
+      "img_s": 548.6688538187828,
+      "peak_gb": 1.774255104,
+      "compile_s": null,
+      "cfg": {
+        "batch": 8,
+        "n_classes": 16,
+        "sync": true,
+        "fused": false,
+        "cl": false,
+        "comp": false
+      }
+    },
+    {
+      "name": "solo: fused Adam",
+      "img_s": 449.5133653703857,
+      "peak_gb": 1.77426432,
+      "compile_s": null,
+      "cfg": {
+        "batch": 8,
+        "n_classes": 16,
+        "sync": false,
+        "fused": true,
+        "cl": false,
+        "comp": false
+      }
+    },
+    {
+      "name": "solo: channels_last",
+      "img_s": 369.9139724271262,
+      "peak_gb": 1.806738432,
+      "compile_s": null,
+      "cfg": {
+        "batch": 8,
+        "n_classes": 16,
+        "sync": false,
+        "fused": false,
+        "cl": true,
+        "comp": false
+      }
+    },
+    {
+      "name": "solo: compile r-o",
+      "img_s": 556.3349944271436,
+      "peak_gb": 1.02701056,
+      "compile_s": 12.499900562688708,
+      "cfg": {
+        "batch": 8,
+        "n_classes": 16,
+        "sync": false,
+        "fused": false,
+        "cl": false,
+        "comp": true
+      }
+    },
+    {
+      "name": "stack: sync+fused",
+      "img_s": 581.0258786330705,
+      "peak_gb": 1.7814912,
+      "compile_s": null,
+      "cfg": {
+        "batch": 8,
+        "n_classes": 16,
+        "sync": true,
+        "fused": true,
+        "cl": false,
+        "comp": false
+      }
+    },
+    {
+      "name": "stack: +channels_last",
+      "img_s": 468.83708674887873,
+      "peak_gb": 1.815028224,
+      "compile_s": null,
+      "cfg": {
+        "batch": 8,
+        "n_classes": 16,
+        "sync": true,
+        "fused": true,
+        "cl": true,
+        "comp": false
+      }
+    },
+    {
+      "name": "stack: full (+compile)",
+      "img_s": 856.6852761222132,
+      "peak_gb": 1.029665792,
+      "compile_s": 14.083149192854762,
+      "cfg": {
+        "batch": 8,
+        "n_classes": 16,
+        "sync": true,
+        "fused": true,
+        "cl": true,
+        "comp": true
+      }
+    },
+    {
+      "name": "full stack @ batch 16",
+      "img_s": 879.7194891487828,
+      "peak_gb": 1.93775104,
+      "compile_s": 18.15276402235031,
+      "cfg": {
+        "batch": 16,
+        "n_classes": 16,
+        "sync": true,
+        "fused": true,
+        "cl": true,
+        "comp": true
+      }
+    },
+    {
+      "name": "full stack @ batch 32",
+      "img_s": 874.2929465862264,
+      "peak_gb": 3.818468352,
+      "compile_s": 0.14444860257208347,
+      "cfg": {
+        "batch": 32,
+        "n_classes": 16,
+        "sync": true,
+        "fused": true,
+        "cl": true,
+        "comp": true
+      }
+    },
+    {
+      "name": "full stack @ batch 64",
+      "img_s": 853.9642657328804,
+      "peak_gb": 7.604419584,
+      "compile_s": 0.1884270366281271,
+      "cfg": {
+        "batch": 64,
+        "n_classes": 16,
+        "sync": true,
+        "fused": true,
+        "cl": true,
+        "comp": true
+      }
+    }
+  ],
+  "duo": {
+    "per_proc": [
+      393.1,
+      395.2
+    ],
+    "aggregate": 788.3
+  },
+  "winner": {
+    "batch_size": 16,
+    "num_workers": 0,
+    "amp": true,
+    "sync_every": 50,
+    "fused_adam": true,
+    "channels_last": true,
+    "compile_mode": "reduce-overhead",
+    "img_s": 879.7,
+    "speedup_vs_faithful_baseline": 2.03,
+    "device": "cuda"
+  }
+}

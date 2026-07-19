@@ -1,5 +1,10 @@
 # RunPod runbook (vecml)
 
+> **Start at `playbooks.md`** — the copy-paste recipes for every proven
+> operation (mint a dataset, run a flight, perf lab, watch/fetch). This file
+> is background: images, rates, API mechanics. `lessons.md` is the burn
+> ledger; nothing in it is optional reading before improvising.
+
 Everything needed so that, once you supply a RunPod API key, spinning a pod for
 even a 5-minute job is one signed-off command. This directory is scaffolding
 only. It creates no pods, no volumes, and no billable resource on its own.

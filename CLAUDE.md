@@ -80,6 +80,25 @@ and wait for his yes before renting.**
 - First paid hour: measure real img/s on a 5090 and re-anchor all estimates.
   The "serious run = 50-150 H200-hours" figure is the softest number.
 
+## Remote operations (LIVE and proven, 19 Jul 2026)
+
+The remote loop is fully operational and documented as copy-paste runbooks in
+`infra/runpod/playbooks.md` — READ THAT FIRST for any pod work, then
+`infra/runpod/lessons.md` (14 burns, each with its durable fix) before
+changing anything. The short version:
+
+- **Data factory (CPU pod, ~$0.30):** corpus comes from HuggingFace, the
+  gated clean tier (1.46M SVGs) is cached on the network volume, datasets are
+  minted remotely in minutes. The Mac uploads nothing.
+- **Training flights (5090 pod):** `scripts/flight.py` + a flightplan JSON
+  runs sequential experiments with a live cockpit; the committed perf recipe
+  `infra/recipes/perflab-5090.json` (880 img/s, 2.03x) is applied via
+  `--from-bench`.
+- **Watching/fetching:** `scripts/pod_log.py` tails any pod's console and
+  fetches checkpoints from the Mac over the S3 gateway.
+- Spend to date is tracked nowhere fancy: every deploy names its cost, Aden
+  pre-authorizes per session. Tear pods down the moment `rc=` prints.
+
 ## Mac usage
 
 M5 MacBooks are for code development, dataloader debugging, and
