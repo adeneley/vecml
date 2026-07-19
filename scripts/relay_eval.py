@@ -93,9 +93,12 @@ def main():
     state = torch.load(args.ckpt, map_location="cpu")
     sd = state["model"]
     n_classes = state.get("n_classes", 0)
+    # Width is not in the payload; the first encoder conv's out-channels is
+    # the UNet base (32 default, 48+ for the wider variants).
+    base = sd["enc1.body.0.weight"].shape[0]
     has_labels = any(k.startswith("head.label") for k in sd)
     if has_labels:
-        model = UNet(head=lambda c: DualHead(c, n_classes))
+        model = UNet(base=base, head=lambda c: DualHead(c, n_classes))
     else:
         model = UNet()
     model.load_state_dict(sd)
