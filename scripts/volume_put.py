@@ -48,7 +48,7 @@ def main():
         aws_secret_access_key=env["RUNPOD_S3_SECRET_KEY"],
         region_name=env.get("RUNPOD_DATACENTER", "EU-RO-1"),
         config=Config(retries={"max_attempts": 10, "mode": "adaptive"},
-                      read_timeout=180, connect_timeout=30),
+                      read_timeout=300, connect_timeout=30),
     )
 
     # Clear stale multipart debris for this key (failed prior attempts).
@@ -62,9 +62,11 @@ def main():
 
     local = Path(args.local)
     size_mb = local.stat().st_size / 1e6
-    cfg = TransferConfig(multipart_chunksize=16 * 1024 * 1024,
-                         multipart_threshold=16 * 1024 * 1024,
-                         max_concurrency=4)
+    # Single stream, 8MB parts: RunPod's gateway 524s reproducibly under
+    # concurrent parts on large files; gentle wins over fast-but-failing.
+    cfg = TransferConfig(multipart_chunksize=8 * 1024 * 1024,
+                         multipart_threshold=8 * 1024 * 1024,
+                         max_concurrency=1)
 
     for attempt in range(1, args.attempts + 1):
         t0 = time.time()

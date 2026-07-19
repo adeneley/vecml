@@ -110,15 +110,37 @@ class Runner:
                 self._trainer.stop()
 
 
-def create_app(defaults: dict, readonly: bool = False, autostart: bool = False) -> FastAPI:
+def create_app(
+    defaults: dict,
+    readonly: bool = False,
+    autostart: bool = False,
+    event_log: str | Path | None = None,
+) -> FastAPI:
     """Build the app around a base config dict (data_root, n, size, ...).
 
     readonly: spectator mode; the UI hides run controls and the control
     endpoints refuse. autostart: kick off a run with the default config as
     soon as the server starts (remote pods; no Start press needed).
+    event_log: append every event as a JSON line to this path. Telemetry
+    persists server-side (on the pod that means the volume) instead of
+    depending on someone's browser or a Mac-side capture being attached.
     """
     app = FastAPI()
     bus = EventBus()
+    if event_log is not None:
+        log_path = Path(event_log)
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_file = open(log_path, "a", buffering=1)
+        _publish = bus.publish
+
+        def publish_and_log(event: dict) -> None:
+            _publish(event)
+            try:
+                log_file.write(json.dumps(event) + "\n")
+            except Exception:  # telemetry loss must never kill training
+                pass
+
+        bus.publish = publish_and_log
     runner = Runner(bus)
     app.state.defaults = defaults
     app.state.runner = runner

@@ -1,0 +1,25 @@
+{
+  "comment": "19 Jul 2026 flight: (A) label head at scale on the unchanged 10k set, one variable vs the RGB baseline; (B) label head on the coloured-bg + curriculum re-wreck. Bench winner supplies batch/workers/amp/lr.",
+  "runs": [
+    {
+      "name": "labels-10k-a",
+      "data_root": "/tmp/data/train-10k",
+      "n": 10000,
+      "val_n": 500,
+      "n_classes": 16,
+      "max_epochs": 300,
+      "target_loss": 0.003,
+      "cache_ram": true
+    },
+    {
+      "name": "labels-10k-bg-b",
+      "data_root": "/tmp/data/train-10k-bg",
+      "n": 10000,
+      "val_n": 500,
+      "n_classes": 16,
+      "max_epochs": 300,
+      "target_loss": 0.003,
+      "cache_ram": true
+    }
+  ]
+}
