@@ -1,0 +1,17 @@
+{
+  "comment": "hippo: the first well-fed run. w010's winning config (label_loss_w 0.1, the 19 Jul reassessment victor) on 100k unique images x 40 epochs - swapping repetition for fresh data at similar compute after every 10k model showed the same memorisation gap. 100k at 256px cannot cache_ram on a 60GB pod, so the dataloader gets workers instead; the recipe's other levers apply via --from-bench.",
+  "runs": [
+    {
+      "name": "hippo-100k",
+      "data_root": "/tmp/data/train-100k",
+      "n": 100000,
+      "val_n": 1000,
+      "n_classes": 16,
+      "label_loss_w": 0.1,
+      "max_epochs": 40,
+      "target_loss": 0.003,
+      "cache_ram": false,
+      "num_workers": 16
+    }
+  ]
+}

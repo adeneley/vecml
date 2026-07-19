@@ -46,17 +46,20 @@ def main() -> int:
         name = run.pop("name")
         run.setdefault("ckpt_dir", f"runs/{name}")
         if winner:
-            run["batch_size"] = winner["batch_size"]
-            run["num_workers"] = winner["num_workers"]
-            run["amp"] = winner["amp"]
+            # The recipe supplies defaults; anything the flightplan sets
+            # explicitly wins (e.g. big datasets that cannot cache_ram need
+            # their own num_workers).
+            run.setdefault("batch_size", winner["batch_size"])
+            run.setdefault("num_workers", winner["num_workers"])
+            run.setdefault("amp", winner["amp"])
             # perflab levers, when the recipe carries them (older bench.json
             # winners don't; TrainConfig defaults are the safe eager path).
             for key in ("sync_every", "fused_adam", "channels_last", "compile_mode",
                         "non_blocking", "cudnn_benchmark"):
                 if key in winner:
-                    run[key] = winner[key]
+                    run.setdefault(key, winner[key])
             # sqrt LR scaling vs the batch-8 baseline all prior runs used.
-            run["lr"] = 3e-4 * math.sqrt(winner["batch_size"] / 8)
+            run.setdefault("lr", 3e-4 * math.sqrt(run["batch_size"] / 8))
         print(f"[flight] run {i}/{len(plan['runs'])}: {name} "
               f"batch={run.get('batch_size', 8)} workers={run.get('num_workers', 0)} "
               f"amp={run.get('amp', True)} lr={run.get('lr', 3e-4):.2e} "
