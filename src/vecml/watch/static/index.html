@@ -142,7 +142,7 @@
   canvas#chart { width: 100%; flex: 1 1 auto; min-height: 0; display: block;
     background: var(--panel2); border: 1px solid var(--line); border-radius: var(--r-sm); cursor: crosshair; }
   .stats { grid-column: 2; grid-row: 1; display: grid; grid-template-columns: 1fr 1fr;
-    grid-template-rows: repeat(5, minmax(0, 1fr)); gap: 9px; min-height: 0; }
+    grid-auto-rows: minmax(0, 1fr); gap: 9px; min-height: 0; }
   .stat { background: var(--panel2); border: 1px solid var(--line); border-radius: var(--r);
     padding: 8px 13px; display: flex; flex-direction: column; justify-content: center; min-height: 0; }
   .stat .k { font-size: 10px; color: var(--dim); text-transform: uppercase; letter-spacing: .07em; font-weight: 600; }
@@ -292,6 +292,7 @@
       <span class="legend">
         <span class="lg"><i style="background:var(--accent)"></i>loss</span>
         <span class="lg"><i style="background:var(--accent2)"></i>epoch mean</span>
+        <span class="lg"><i style="background:var(--chart-val)"></i>val</span>
       </span>
       <span class="grow"></span>
       <button class="toggle" id="t_log" title="logarithmic y-axis">log y</button>
@@ -307,6 +308,7 @@
     <div class="stat"><div class="k">loss now</div><div class="v" id="s_loss">&ndash;</div></div>
     <div class="stat"><div class="k">loss best</div><div class="v" id="s_best">&ndash;</div></div>
     <div class="stat"><div class="k">epoch mean</div><div class="v" id="s_emean" style="color:var(--accent2)">&ndash;</div></div>
+    <div class="stat"><div class="k">val loss</div><div class="v" id="s_val" style="color:var(--chart-val)">&ndash;</div></div>
     <!-- dual-head runs only: unhidden when the run first reports them -->
     <div class="stat" id="st_ce" hidden><div class="k">labels loss</div><div class="v" id="s_ce">&ndash;</div></div>
     <div class="stat" id="st_acc" hidden><div class="k">label acc</div><div class="v" id="s_acc">&ndash;</div></div>
@@ -804,6 +806,7 @@
     TARGET = 0.003; MAX_EPOCHS = null;  // next run's status event re-supplies
     clockBase = 0; clockAt = 0; ipsInit = false; ipsShown = 0; ipsTarget = 0;
     $("s_best").textContent = "–"; $("s_emean").textContent = "–"; $("s_lr").textContent = "–";
+    $("s_val").textContent = "–";
     $("st_ce").hidden = true; $("st_acc").hidden = true;
     $("s_ce").textContent = "–"; $("s_acc").textContent = "–";
     draw();
@@ -837,6 +840,7 @@
       $("s_loss").textContent = fmt(ev.loss, 4);
       if (ev.loss < best) { best = ev.loss; $("s_best").textContent = fmt(best, 4); }
       if (ev.epoch_mean != null) $("s_emean").textContent = fmt(ev.epoch_mean, 4);
+      if (ev.val_mean != null) $("s_val").textContent = fmt(ev.val_mean, 4);
       if (ev.loss_ce != null) {
         $("st_ce").hidden = false; $("s_ce").textContent = fmt(ev.loss_ce, 4);
       }
