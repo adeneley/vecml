@@ -69,14 +69,19 @@ def main() -> None:
         import math
 
         winner = json.loads(open(args.from_bench).read())
+        winner = winner.get("winner", winner)  # perflab.json nests it
         defaults["batch_size"] = winner["batch_size"]
         defaults["num_workers"] = winner["num_workers"]
         defaults["amp"] = winner["amp"]
+        for key in ("sync_every", "fused_adam", "channels_last", "compile_mode"):
+            if key in winner:
+                defaults[key] = winner[key]
         # sqrt scaling (gentler than linear; safer for Adam) vs the batch-8
         # baseline every historical run used.
         defaults["lr"] = 3e-4 * math.sqrt(winner["batch_size"] / 8)
         print(f"bench winner applied: batch {winner['batch_size']}, "
               f"workers {winner['num_workers']}, amp {winner['amp']}, "
+              f"compile {defaults.get('compile_mode')}, sync {defaults.get('sync_every', 1)}, "
               f"lr {defaults['lr']:.2e} ({winner.get('img_s', '?')} img/s measured)")
     app = create_app(defaults, readonly=args.readonly, autostart=args.autostart)
 

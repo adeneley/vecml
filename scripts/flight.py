@@ -36,7 +36,10 @@ def main() -> int:
     args = ap.parse_args()
 
     plan = json.loads(Path(args.plan).read_text())
-    winner = json.loads(Path(args.from_bench).read_text()) if args.from_bench else None
+    winner = None
+    if args.from_bench:
+        winner = json.loads(Path(args.from_bench).read_text())
+        winner = winner.get("winner", winner)  # perflab.json nests it
 
     for i, run in enumerate(plan["runs"], 1):
         run = dict(run)
@@ -46,11 +49,19 @@ def main() -> int:
             run["batch_size"] = winner["batch_size"]
             run["num_workers"] = winner["num_workers"]
             run["amp"] = winner["amp"]
+            # perflab levers, when the recipe carries them (older bench.json
+            # winners don't; TrainConfig defaults are the safe eager path).
+            for key in ("sync_every", "fused_adam", "channels_last", "compile_mode"):
+                if key in winner:
+                    run[key] = winner[key]
             # sqrt LR scaling vs the batch-8 baseline all prior runs used.
             run["lr"] = 3e-4 * math.sqrt(winner["batch_size"] / 8)
         print(f"[flight] run {i}/{len(plan['runs'])}: {name} "
               f"batch={run.get('batch_size', 8)} workers={run.get('num_workers', 0)} "
-              f"amp={run.get('amp', True)} lr={run.get('lr', 3e-4):.2e}", flush=True)
+              f"amp={run.get('amp', True)} lr={run.get('lr', 3e-4):.2e} "
+              f"compile={run.get('compile_mode')} sync={run.get('sync_every', 1)} "
+              f"fused={run.get('fused_adam', False)} cl={run.get('channels_last', False)}",
+              flush=True)
 
         app = create_app(
             defaults=run,

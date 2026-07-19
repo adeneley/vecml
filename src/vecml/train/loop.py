@@ -150,6 +150,19 @@ class TrainConfig:
     amp: bool = True
     pin_memory: bool = True
     cache_ram: bool = False
+    # Second-round levers, measured by scripts/perflab.py (19 Jul 2026, 5090:
+    # trainer-faithful baseline 433 img/s -> full stack 880). All default off;
+    # CUDA-only ones are ignored elsewhere.
+    #   sync_every    read losses off the GPU every N steps, not every step
+    #                 (the per-step .item() stall alone cost ~27%)
+    #   fused_adam    single-kernel Adam update
+    #   channels_last NHWC memory format (hurts eager, helps under compile)
+    #   compile_mode  torch.compile mode for the train step, e.g.
+    #                 "reduce-overhead" (~12-18s one-off compile at start)
+    sync_every: int = 1
+    fused_adam: bool = False
+    channels_last: bool = False
+    compile_mode: str | None = None
     extra: dict = field(default_factory=dict)
 
 
@@ -244,8 +257,20 @@ class Trainer:
             model = UNet(head=lambda c: DualHead(c, cfg.n_classes)).to(self.device)
         else:
             model = UNet().to(self.device)
+        cuda = self.device == "cuda"
+        use_cl = cfg.channels_last and cuda
+        if use_cl:
+            model = model.to(memory_format=torch.channels_last)
+        # `model` stays the plain module for checkpoints, val and samples;
+        # `net` (maybe compiled) is used for the train step only, so eval-time
+        # shape changes never touch the CUDA-graph cache.
+        net = model
+        if cfg.compile_mode and cuda:
+            net = torch.compile(model, mode=cfg.compile_mode)
         self.params = count_params(model)
-        optim = torch.optim.Adam(model.parameters(), lr=cfg.lr)
+        optim = torch.optim.Adam(
+            model.parameters(), lr=cfg.lr, fused=cfg.fused_adam and cuda
+        )
         # Cosine decay from lr down to ~lr/20 over the whole run, stepped once
         # per epoch. Fixes the constant-LR bounce observed near the loss floor.
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
@@ -273,6 +298,36 @@ class Trainer:
         last_metric_t = 0.0
         last_sample_t = 0.0
 
+        # Loss reads are batched: sums stay on the GPU and are synced to
+        # Python every cfg.sync_every steps (and at epoch end). loss_val /
+        # ce_val hold the latest synced window means between flushes; the
+        # best-checkpoint check rides the same cadence, which also throttles
+        # early-run save churn. With sync_every=1 this is exactly the old
+        # per-step behaviour.
+        epoch_loss_sum = 0.0
+        epoch_items = 0
+        pend_l1 = None
+        pend_ce = None
+        pend_items = 0
+        pend_steps = 0
+        loss_val = float("inf")
+        ce_val = None
+
+        def flush_pending() -> None:
+            nonlocal pend_l1, pend_ce, pend_items, pend_steps
+            nonlocal loss_val, ce_val, epoch_loss_sum, epoch_items
+            if pend_steps == 0:
+                return
+            l1_sum = float(pend_l1.item())
+            epoch_loss_sum += l1_sum
+            epoch_items += pend_items
+            # The chart/target "loss" is always the L1 component so label
+            # and RGB-only runs stay comparable on the same axis.
+            loss_val = l1_sum / pend_items
+            if pend_ce is not None:
+                ce_val = float(pend_ce.item()) / pend_items
+            pend_l1, pend_ce, pend_items, pend_steps = None, None, 0, 0
+
         for epoch in range(cfg.max_epochs):
             epoch_loss_sum = 0.0
             epoch_items = 0
@@ -285,16 +340,17 @@ class Trainer:
 
                 x = batch[0].to(self.device)  # plain transfer, never non_blocking
                 y = batch[1].to(self.device)
+                if use_cl:
+                    x = x.contiguous(memory_format=torch.channels_last)
+                    y = y.contiguous(memory_format=torch.channels_last)
                 lab = batch[2].to(self.device) if ce_fn is not None else None
 
-                ce_val = None
                 with amp_ctx():
-                    out = model(x)
+                    out = net(x)
                     if ce_fn is not None:
                         l1 = loss_fn(out["rgb"], y)
                         ce = ce_fn(out["logits"], lab)
                         loss = l1 + cfg.label_loss_w * ce
-                        ce_val = float(ce.detach().to("cpu").item())
                     else:
                         l1 = loss = loss_fn(out, y)
 
@@ -305,28 +361,37 @@ class Trainer:
                 global_step += 1
                 bs = x.shape[0]
                 window_imgs += bs
-                # The chart/target "loss" is always the L1 component so label
-                # and RGB-only runs stay comparable on the same axis.
-                loss_val = float(l1.detach().to("cpu").item())
-                epoch_loss_sum += loss_val * bs
-                epoch_items += bs
+                # Accumulate on-GPU immediately: under reduce-overhead the
+                # loss tensor's buffer is reused by the next graph replay, so
+                # the add must be enqueued now (same stream = safe ordering).
+                d1 = l1.detach() * bs
+                pend_l1 = d1 if pend_l1 is None else pend_l1 + d1
+                if ce_fn is not None:
+                    dc = ce.detach() * bs
+                    pend_ce = dc if pend_ce is None else pend_ce + dc
+                pend_items += bs
+                pend_steps += 1
 
-                if loss_val < self.best_loss:
-                    self.best_loss = loss_val
-                    torch.save(
-                        {
-                            "model": model.state_dict(),
-                            "step": global_step,
-                            "epoch": epoch,
-                            "loss": loss_val,
-                            "params": self.params,
-                            "n_classes": cfg.n_classes,
-                        },
-                        ckpt_dir / "best.pt",
-                    )
+                if pend_steps >= cfg.sync_every:
+                    flush_pending()
+                    if loss_val < self.best_loss:
+                        self.best_loss = loss_val
+                        torch.save(
+                            {
+                                "model": model.state_dict(),
+                                "step": global_step,
+                                "epoch": epoch,
+                                "loss": loss_val,
+                                "params": self.params,
+                                "n_classes": cfg.n_classes,
+                            },
+                            ckpt_dir / "best.pt",
+                        )
 
                 now = time.perf_counter()
                 first = global_step == 1  # wake the UI on the very first step
+                if first:
+                    flush_pending()  # never show the UI a pre-sync sentinel
                 if first or (now - last_metric_t) >= cfg.metric_interval_s:
                     dt = max(now - window_start, 1e-9)
                     self._emit(
@@ -355,6 +420,7 @@ class Trainer:
             if stopped:
                 break
 
+            flush_pending()  # drain the tail window into the epoch sums
             epoch_mean = epoch_loss_sum / max(epoch_items, 1)
             val_mean = None
             val_acc = None

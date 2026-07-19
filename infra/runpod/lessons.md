@@ -77,3 +77,32 @@ scrollback; the pull it showed failing had just completed. Cost: the whole
 pull, redone. Rule: before teardown/delete/restart, fetch the resource's
 CURRENT state (API call, fresh log tail) in the same minute you act on it. A
 screenshot, a paste, or "the last thing I saw" is history, not state.
+
+## 11. Slimmed tarballs lie about the pair contract
+train-10k-run.tar.gz was slimmed overnight to cut upload time (clean.png +
+wrecked only) and later reused for a label-head flight; every sample dir then
+failed the labels filter and the flight crashed 7s in with "no usable sample
+dirs". The extraction succeeded, the data looked fine locally, and only loud
+dataset diagnostics (entry counts + a probe dir listing baked into the
+exception) made the cause visible from a crash log.
+**Fixes:** (a) DONE: pairs.py raises with entry counts, pre-filter counts and
+a probe-dir file listing, so a pod's crash log names the missing files.
+(b) Rule: a dataset pack must carry the FULL pair contract (clean, wrecked,
+labels.png, palette.json, meta) or its name must say what it dropped
+(-rgb-only); the JOB_CMD preflight `ls` of one sample dir before training
+stays in every flight job.
+
+## 12. Trainer speed levers, measured (perflab, 5090, 19 Jul 2026)
+bench.py's 609 img/s was a benchmark artifact: it never paid the per-step
+loss.item() the real trainer paid, whose faithful baseline was 433 img/s.
+scripts/perflab.py measured the remaining levers solo and stacked:
+sync-every-50 +27%, fused Adam +4%, channels_last -14% ALONE (helps under
+compile), torch.compile reduce-overhead +29% and the star of the stack.
+Full stack 857 @ batch 8; batch re-sweep with the stack on flips the batch
+answer to 16 (880 img/s, 2.03x). Two processes sharing the card aggregate to
+788 - WORSE than one process; duo is dead for this model size. Compile tax is
+12-18s once per shape.
+**Fix (durable):** TrainConfig grew sync_every / fused_adam / channels_last /
+compile_mode; flight.py and watch.py --from-bench apply them from a
+perflab.json winner. Re-run perflab when the model grows: every one of these
+numbers is model-size dependent.
