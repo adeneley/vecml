@@ -136,6 +136,20 @@ def render_svg_rgba(svg_path, size: int) -> np.ndarray:
     return np.asarray(canvas, dtype=np.uint8)
 
 
+def composite_rgba(rgba: np.ndarray, colour=(255, 255, 255)) -> np.ndarray:
+    """Alpha-composite an RGBA array over a solid colour, returning RGB uint8.
+
+    Compositing (rather than pixel substitution) keeps anti-aliased edges
+    physically correct on any background colour: a 60% ink pixel blends with
+    the actual background instead of dragging white fringes along.
+    """
+    rgb = rgba[:, :, :3].astype(np.float32)
+    alpha = rgba[:, :, 3:4].astype(np.float32) / 255.0
+    bg = np.broadcast_to(np.asarray(colour, dtype=np.float32), rgb.shape)
+    out = rgb * alpha + bg * (1.0 - alpha)
+    return np.clip(out, 0, 255).astype(np.uint8)
+
+
 def render_svg(svg_path, size: int) -> np.ndarray:
     """Render an SVG to an RGB uint8 array of shape (size, size, 3).
 
@@ -143,9 +157,4 @@ def render_svg(svg_path, size: int) -> np.ndarray:
     solid white background, which matches how flat-colour print artwork sits
     on paper.
     """
-    rgba = render_svg_rgba(svg_path, size)
-    rgb = rgba[:, :, :3].astype(np.float32)
-    alpha = rgba[:, :, 3:4].astype(np.float32) / 255.0
-    white = np.full_like(rgb, 255.0)
-    out = rgb * alpha + white * (1.0 - alpha)
-    return np.clip(out, 0, 255).astype(np.uint8)
+    return composite_rgba(render_svg_rgba(svg_path, size))

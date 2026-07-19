@@ -31,13 +31,13 @@ RECON_TOL = 12.0
 BLANK_INK_FRAC = 0.002
 
 
-def ink_mask(clean_rgb):
-    """Boolean HxW mask of pixels that carry ink (differ from white)."""
-    diff = np.abs(clean_rgb.astype(np.int16) - 255)
+def ink_mask(clean_rgb, bg=(255, 255, 255)):
+    """Boolean HxW mask of pixels that carry ink (differ from the background)."""
+    diff = np.abs(clean_rgb.astype(np.int16) - np.asarray(bg, dtype=np.int16))
     return np.any(diff > INK_THRESHOLD, axis=2)
 
 
-def audit_sample(clean_rgb, label_map, palette, n_declared=None):
+def audit_sample(clean_rgb, label_map, palette, n_declared=None, bg=(255, 255, 255)):
     """Score one sample. Return {"metrics": {...}, "flags": [...]}.
 
     clean_rgb: HxWx3 uint8 clean render.
@@ -45,9 +45,12 @@ def audit_sample(clean_rgb, label_map, palette, n_declared=None):
     palette: (N+1)x3 uint8, row 0 = background.
     n_declared: distinct foreground colours the SVG declared, or None if unknown
       (the pixel-fallback path cannot report it, so palette_match is skipped).
+    bg: the colour the render was composited over; ink = "differs from bg",
+      so coloured-background sets audit correctly instead of reading the
+      entire background as ink.
     """
     palette = np.asarray(palette)
-    ink = ink_mask(clean_rgb)
+    ink = ink_mask(clean_rgb, bg)
     ink_frac = float(ink.mean())
     label_nonzero_frac = float((label_map != 0).mean())
     coverage_delta = abs(ink_frac - label_nonzero_frac)

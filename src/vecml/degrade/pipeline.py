@@ -23,8 +23,22 @@ from PIL import Image
 from .audit import audit_sample
 from .idmap import DerivationError, derive_labels_from_svg
 from .labels import derive_labels_from_pixels
-from .renderer import backend_name, render_svg
+from .renderer import backend_name, composite_rgba, render_svg_rgba
 from .wreck import apply_recipe, sample_recipe
+
+
+def _sample_bg(rng, palette) -> tuple[int, int, int]:
+    """Pick a background colour: mostly white, otherwise a random colour kept
+    a minimum distance from every foreground palette row so the art never
+    vanishes into its own background."""
+    if rng.random() < 0.4:
+        return (255, 255, 255)
+    fg = palette[1:].astype(np.float32) if len(palette) > 1 else None
+    for _ in range(10):
+        c = rng.integers(0, 256, size=3)
+        if fg is None or np.linalg.norm(fg - c.astype(np.float32), axis=1).min() > 60:
+            return tuple(int(v) for v in c)
+    return (255, 255, 255)
 
 
 def _derive_ground_truth(svg_path, clean, size):
@@ -51,8 +65,21 @@ def wreck_svg(
     n_variants: int = 4,
     seed: int = 0,
     difficulty: str = "medium",
+    bg_mode: str = "white",
+    curriculum: bool = False,
 ):
     """Render, label, and wreck one SVG into a directory of training pairs.
+
+    bg_mode "random": labels are still derived from the white composite (the
+    idmap/labels heuristics assume white paper), then clean/wrecked are
+    re-composited from the same alpha over a sampled background colour and
+    palette row 0 is rewritten to it. The QC audit runs against the final
+    coloured render, so pairs where the white-paper assumption breaks (e.g.
+    near-white art folded into background) flag themselves via reconstruction
+    error instead of silently corrupting the set.
+
+    curriculum: a slice of variants get zero damage (identity pairs) or
+    severity scaled way down, teaching the model to leave clean input alone.
 
     Returns a small summary dict (counts and paths) for the caller to log.
     """
@@ -60,12 +87,20 @@ def wreck_svg(
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    clean = render_svg(svg_path, size)
+    rgba = render_svg_rgba(svg_path, size)
+    clean_white = composite_rgba(rgba)
     label_map, palette, n_declared, method, warnings = _derive_ground_truth(
-        svg_path, clean, size
+        svg_path, clean_white, size
     )
 
-    qc = audit_sample(clean, label_map, palette, n_declared)
+    bg = (255, 255, 255)
+    if bg_mode == "random":
+        bg = _sample_bg(np.random.default_rng(seed * 7919 + 17), palette)
+        palette = palette.copy()
+        palette[0] = bg
+    clean = composite_rgba(rgba, bg) if bg != (255, 255, 255) else clean_white
+
+    qc = audit_sample(clean, label_map, palette, n_declared, bg=bg)
 
     # Write the shared, variant-independent artefacts.
     Image.fromarray(clean, mode="RGB").save(out_dir / "clean.png")
@@ -92,6 +127,12 @@ def wreck_svg(
         variant_seed = seed * 100003 + i
         rng = np.random.default_rng(variant_seed)
         recipe = sample_recipe(rng, difficulty)
+        if curriculum:
+            draw = rng.random()
+            if draw < 0.12:
+                recipe = []  # identity pair: the "don't fix what isn't broken" lesson
+            elif draw < 0.30:
+                recipe = [(op, sev * 0.3) for op, sev in recipe]  # barely damaged
         wrecked = apply_recipe(clean, recipe, rng)
 
         name = f"wrecked_{i:02d}.png"
@@ -108,6 +149,9 @@ def wreck_svg(
         "source_svg": str(svg_path),
         "size": size,
         "difficulty": difficulty,
+        "bg_mode": bg_mode,
+        "bg": list(bg),
+        "curriculum": curriculum,
         "base_seed": seed,
         "n_variants": n_variants,
         "backend": backend_name(),
