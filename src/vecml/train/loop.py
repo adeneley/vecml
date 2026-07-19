@@ -145,6 +145,9 @@ class TrainConfig:
     # comparable across modes.
     n_classes: int = 0
     label_loss_w: float = 0.25
+    # UNet width: channel count of the first encoder stage (32 -> ~1.9M params,
+    # 48 -> ~4.2M, 64 -> ~7.5M). Params scale ~quadratically with base.
+    base: int = 32
     # Throughput levers (see scripts/bench.py for finding the right values):
     # bf16 autocast on CUDA, pinned host memory, in-RAM decoded-image cache.
     amp: bool = True
@@ -254,9 +257,9 @@ class Trainer:
             gpu_mon.start()
 
         if cfg.n_classes:
-            model = UNet(head=lambda c: DualHead(c, cfg.n_classes)).to(self.device)
+            model = UNet(base=cfg.base, head=lambda c: DualHead(c, cfg.n_classes)).to(self.device)
         else:
-            model = UNet().to(self.device)
+            model = UNet(base=cfg.base).to(self.device)
         cuda = self.device == "cuda"
         use_cl = cfg.channels_last and cuda
         if use_cl:
