@@ -63,11 +63,16 @@ def main() -> int:
               f"fused={run.get('fused_adam', False)} cl={run.get('channels_last', False)}",
               flush=True)
 
+        title = (f"{name} · run {i}/{len(plan['runs'])} · "
+                 f"{Path(run['data_root']).name} n={run.get('n', '?')} "
+                 f"K={run.get('n_classes', 0)} batch={run.get('batch_size', 8)}"
+                 + (" · compiled" if run.get("compile_mode") else ""))
         app = create_app(
             defaults=run,
             readonly=True,
             autostart=True,
             event_log=Path(run["ckpt_dir"]) / "events.jsonl",
+            title=title,
         )
         server = uvicorn.Server(uvicorn.Config(
             app, host=args.host, port=args.port, log_level="warning"))

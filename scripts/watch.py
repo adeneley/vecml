@@ -83,7 +83,12 @@ def main() -> None:
               f"workers {winner['num_workers']}, amp {winner['amp']}, "
               f"compile {defaults.get('compile_mode')}, sync {defaults.get('sync_every', 1)}, "
               f"lr {defaults['lr']:.2e} ({winner.get('img_s', '?')} img/s measured)")
-    app = create_app(defaults, readonly=args.readonly, autostart=args.autostart)
+    from pathlib import Path as _P
+
+    title = (f"{_P(defaults['ckpt_dir']).name} · {_P(args.data).name} "
+             f"n={args.n} K={args.classes} batch={defaults.get('batch_size', 8)}")
+    app = create_app(defaults, readonly=args.readonly, autostart=args.autostart,
+                     title=title)
 
     url = f"http://127.0.0.1:{args.port}"
     print(f"cockpit: {url}  (data={args.data} n={args.n} size={args.size})")

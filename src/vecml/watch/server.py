@@ -88,6 +88,7 @@ class Runner:
         self._lock = threading.Lock()
         self._trainer: Trainer | None = None
         self._thread: threading.Thread | None = None
+        self._starts = 0
 
     def is_running(self) -> bool:
         return self._thread is not None and self._thread.is_alive()
@@ -97,7 +98,13 @@ class Runner:
             if self.is_running():
                 return False
             self.bus.clear_history()
-            trainer = Trainer(cfg, self.bus.publish)
+            # Stamp every event with a per-run tag so clients can tell a
+            # reconnect replay (same tag, seen seqs -> skip) from a genuinely
+            # new run (new tag -> reset the chart).
+            self._starts += 1
+            run_tag = f"{cfg.ckpt_dir}#{self._starts}"
+            publish = self.bus.publish
+            trainer = Trainer(cfg, lambda e: publish({**e, "_run": run_tag}))
             thread = threading.Thread(target=trainer.run, daemon=True)
             self._trainer = trainer
             self._thread = thread
@@ -115,6 +122,7 @@ def create_app(
     readonly: bool = False,
     autostart: bool = False,
     event_log: str | Path | None = None,
+    title: str | None = None,
 ) -> FastAPI:
     """Build the app around a base config dict (data_root, n, size, ...).
 
@@ -152,11 +160,18 @@ def create_app(
 
     @app.get("/")
     def index() -> HTMLResponse:
+        import html as html_mod
+
         html = (STATIC / "index.html").read_text()
         if readonly:
             html = html.replace(
                 'name="vecml-readonly" content="0"',
                 'name="vecml-readonly" content="1"',
+            )
+        if title:
+            html = html.replace(
+                'name="vecml-title" content=""',
+                f'name="vecml-title" content="{html_mod.escape(title, quote=True)}"',
             )
         return HTMLResponse(html)
 

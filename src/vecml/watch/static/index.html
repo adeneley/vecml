@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="vecml-readonly" content="0">
+<meta name="vecml-title" content="">
 <title>vecml cockpit</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%231f6fb2'/%3E%3Cpolyline points='5,24 12,15 18,19 27,7' fill='none' stroke='%23fff' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3Ccircle cx='27' cy='7' r='2.6' fill='%23fff'/%3E%3C/svg%3E">
 <style>
@@ -144,6 +145,16 @@
   .cap { flex: 0 0 auto; text-align: center; color: var(--muted); font-size: 12px;
     font-variant-numeric: tabular-nums; }
   .console { grid-column: 1 / -1; grid-row: 3; }
+  /* console collapsed by default; header click toggles, errors auto-expand */
+  .console .card-head { cursor: pointer; }
+  body.nocon main#view_train {
+    grid-template-rows: minmax(0, 1.2fr) minmax(0, 1.6fr) auto; }
+  body.nocon #log { display: none; }
+  .runtitle { font-size: 13px; font-weight: 600; color: var(--fg);
+    background: var(--panel2); border: 1px solid var(--line); border-radius: 6px;
+    padding: 4px 10px; max-width: 46vw; overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap; }
+  .runtitle .sub { color: var(--muted); font-weight: 500; }
   /* hidden must beat the explicit display: grid/flex on the main views */
   main[hidden] { display: none !important; }
   /* header tabs */
@@ -190,6 +201,7 @@
 <body class="idle">
 <header>
   <h1>vecml cockpit</h1>
+  <span id="runtitle" class="runtitle" hidden></span>
   <nav class="tabs">
     <button class="tab on" id="tab_train">train</button>
     <button class="tab" id="tab_run">run</button>
@@ -382,6 +394,7 @@
     line.appendChild(document.createTextNode(msg));
     el.appendChild(line);
     if (atBottom) el.scrollTop = el.scrollHeight; // only auto-scroll if user was at bottom
+    if (cls === "err" && document.body.classList.contains("nocon")) setConsole(true);
   }
 
   function setState(state, detail) {
@@ -679,7 +692,27 @@
     requestAnimationFrame(() => { img.style.opacity = "1"; });
   }
 
+  // SSE replay guard: the proxy drops connections and every reconnect replays
+  // full history; without this, old points append after new ones and the
+  // chart grows straight "fan" lines back to step 1. Events carry a _run tag
+  // and a _seq; same run + seen seq = duplicate (skip), new tag = new run
+  // (reset the view).
+  let curRun = null, maxSeq = -1;
+  function resetRunView() {
+    best = Infinity; losses.length = 0; hoverX = null;
+    clockBase = 0; clockAt = 0; ipsInit = false; ipsShown = 0; ipsTarget = 0;
+    $("s_best").textContent = "—"; $("s_emean").textContent = "—"; $("s_lr").textContent = "—";
+    draw();
+  }
+
   function onEvent(ev) {
+    if (ev._run !== undefined) {
+      if (ev._run !== curRun) { curRun = ev._run; maxSeq = -1; resetRunView(); }
+      if (ev._seq !== undefined) {
+        if (ev._seq <= maxSeq) return; // replayed duplicate
+        maxSeq = ev._seq;
+      }
+    }
     if (ev.type === "status") {
       setState(ev.state, ev.detail);
       if (ev.detail && ev.detail.indexOf("device=") === 0)
@@ -757,9 +790,39 @@
     es.onerror = () => { log("[sse] disconnected, retrying...", "dim"); };
   }
 
-  // Read-only (spectator) mode: no run controls at all.
+  // Read-only (spectator) mode: no run controls, no inference tab (remote
+  // pods list remote checkpoints the browser can't meaningfully use anyway).
   const READONLY = (document.querySelector('meta[name="vecml-readonly"]') || {}).content === "1";
-  if (READONLY) runBtn.style.display = "none";
+  if (READONLY) {
+    runBtn.style.display = "none";
+    document.querySelector(".tabs").style.display = "none";
+  }
+
+  // Run identity: which experiment this cockpit is showing (server-injected).
+  const RUN_TITLE = (document.querySelector('meta[name="vecml-title"]') || {}).content || "";
+  if (RUN_TITLE) {
+    const parts = RUN_TITLE.split("·");
+    $("runtitle").innerHTML = "<strong></strong><span class='sub'></span>";
+    $("runtitle").querySelector("strong").textContent = parts[0].trim();
+    $("runtitle").querySelector(".sub").textContent =
+      parts.length > 1 ? " · " + parts.slice(1).join("·").trim() : "";
+    $("runtitle").hidden = false;
+    $("runtitle").title = RUN_TITLE;
+    document.title = parts[0].trim() + " · vecml";
+  }
+
+  // Console: collapsed unless the user opened it; errors force it open.
+  const conKey = "vecml_con";
+  document.body.classList.toggle("nocon", localStorage.getItem(conKey) !== "1");
+  function setConsole(open) {
+    document.body.classList.toggle("nocon", !open);
+    localStorage.setItem(conKey, open ? "1" : "0");
+    sizeCanvas(); draw(); // chart row height changed
+  }
+  document.querySelector(".console .card-head").addEventListener("click", (e) => {
+    if (e.target.id === "t_clear") return;
+    setConsole(document.body.classList.contains("nocon"));
+  });
 
   runBtn.addEventListener("click", async () => {
     runBtn.disabled = true;
@@ -767,9 +830,7 @@
       await fetch("/stop", { method: "POST" });
       log("[ui] stop requested", "dim");
     } else {
-      best = Infinity; losses.length = 0; hoverX = null; draw();
-      clockBase = 0; clockAt = 0; ipsInit = false; ipsShown = 0; ipsTarget = 0;
-      $("s_best").textContent = "—"; $("s_emean").textContent = "—"; $("s_lr").textContent = "—";
+      resetRunView();
       const r = await fetch("/start", { method: "POST",
         headers: { "Content-Type": "application/json" }, body: "{}" });
       if (r.status === 409) { log("[ui] already running", "dim"); runBtn.disabled = false; }
