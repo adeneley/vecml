@@ -144,6 +144,8 @@
   .cap { flex: 0 0 auto; text-align: center; color: var(--muted); font-size: 12px;
     font-variant-numeric: tabular-nums; }
   .console { grid-column: 1 / -1; grid-row: 3; }
+  /* hidden must beat the explicit display: grid/flex on the main views */
+  main[hidden] { display: none !important; }
   /* header tabs */
   .tabs { display: flex; gap: 4px; background: var(--panel2); border: 1px solid var(--line);
     border-radius: 8px; padding: 3px; }
