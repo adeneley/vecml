@@ -1,0 +1,16 @@
+{
+  "comment": "base48 probe split out to run in parallel with labels-w010 (pod 1 was mid-flight with the sequential plan when we split; distinct run name avoids both pods writing checkpoints/labels-base48/ during the teardown overlap).",
+  "runs": [
+    {
+      "name": "labels-b48",
+      "data_root": "/tmp/data/train-10k",
+      "n": 10000,
+      "val_n": 500,
+      "n_classes": 16,
+      "base": 48,
+      "max_epochs": 300,
+      "target_loss": 0.003,
+      "cache_ram": true
+    }
+  ]
+}
