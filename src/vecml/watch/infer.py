@@ -39,6 +39,7 @@ def list_ckpts(root: str | Path = "runs") -> list[dict]:
             {
                 "path": str(p),
                 "name": p.parent.name,
+                "base": int(sd["enc1.body.0.weight"].shape[0]),
                 "n_classes": n_classes,
                 "loss": ckpt.get("loss"),
                 "epoch": ckpt.get("epoch"),
@@ -68,12 +69,13 @@ def _load(path: Path) -> tuple[UNet, int]:
         if _cache.key == key:
             return _cache.model, _cache.n_classes
         sd = torch.load(path, map_location="cpu")["model"]
+        base = int(sd["enc1.body.0.weight"].shape[0])
         if "head.label.weight" in sd:
             n_classes = int(sd["head.label.weight"].shape[0])
-            model = UNet(head=lambda c: DualHead(c, n_classes))
+            model = UNet(base=base, head=lambda c: DualHead(c, n_classes))
         else:
             n_classes = 0
-            model = UNet()
+            model = UNet(base=base)
         model.load_state_dict(sd)
         model.eval()
         _cache.key, _cache.model, _cache.n_classes = key, model, n_classes
