@@ -379,6 +379,11 @@ class Trainer:
 
                 optim.zero_grad()
                 loss.backward()
+                # Seatbelt against one-off divergence (hippo48-500k, 19 Jul):
+                # a single pathological step under bf16 can kick the weights
+                # somewhere training never recovers from. Norm-clipping bounds
+                # that step; at 1.0 it is inert on healthy gradients.
+                torch.nn.utils.clip_grad_norm_(net.parameters(), 1.0)
                 optim.step()
 
                 global_step += 1
