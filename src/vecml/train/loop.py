@@ -116,6 +116,36 @@ def _labels_to_b64_png(idx_hw: torch.Tensor, size: int) -> str:
     return base64.b64encode(buf.getvalue()).decode("ascii")
 
 
+def _boundary_f1_parts(pred: torch.Tensor, gt: torch.Tensor):
+    """Boundary-F1 components for int label maps (B,H,W), 1px tolerance.
+
+    Overall pixel accuracy saturates in the mid-90s while nearly all label
+    errors sit ON region boundaries, so accuracy cannot rank label heads.
+    Boundary F1 can: precision = predicted-boundary pixels within 1px of a
+    true boundary, recall = true-boundary pixels within 1px of a predicted
+    one. Returns raw sums so batches accumulate exactly.
+    """
+    def bmask(lab):
+        b = torch.zeros_like(lab, dtype=torch.bool)
+        d = lab[:, 1:, :] != lab[:, :-1, :]
+        b[:, 1:, :] |= d
+        b[:, :-1, :] |= d
+        d = lab[:, :, 1:] != lab[:, :, :-1]
+        b[:, :, 1:] |= d
+        b[:, :, :-1] |= d
+        return b
+
+    def dilate(b):
+        f = torch.nn.functional.max_pool2d(b.float().unsqueeze(1), 3, 1, 1)
+        return f.squeeze(1) > 0
+
+    pb, gb = bmask(pred), bmask(gt)
+    return (
+        int((pb & dilate(gb)).sum().item()), int(pb.sum().item()),
+        int((gb & dilate(pb)).sum().item()), int(gb.sum().item()),
+    )
+
+
 @dataclass
 class TrainConfig:
     """Overfit-on-N defaults; every field is plumbed from the CLI/cockpit."""
@@ -441,10 +471,12 @@ class Trainer:
             epoch_mean = epoch_loss_sum / max(epoch_items, 1)
             val_mean = None
             val_acc = None
+            val_bf = None
             if val_loader is not None:
                 model.eval()
                 v_sum, v_items = 0.0, 0
                 v_correct, v_pix = 0, 0
+                v_bf = [0, 0, 0, 0]  # tp_precision, n_pred_boundary, tp_recall, n_gt_boundary
                 with torch.no_grad():
                     for vbatch in val_loader:
                         vx = vbatch[0].to(self.device)  # plain transfer
@@ -453,8 +485,11 @@ class Trainer:
                         if ce_fn is not None:
                             v_loss = loss_fn(vout["rgb"], vy)
                             vlab = vbatch[2].to(self.device)
-                            v_correct += int((vout["logits"].argmax(1) == vlab).sum().item())
+                            vpred = vout["logits"].argmax(1)
+                            v_correct += int((vpred == vlab).sum().item())
                             v_pix += int(vlab.numel())
+                            for j, part in enumerate(_boundary_f1_parts(vpred, vlab)):
+                                v_bf[j] += part
                         else:
                             v_loss = loss_fn(vout, vy)
                         v_sum += float(v_loss.item()) * vx.shape[0]
@@ -462,6 +497,11 @@ class Trainer:
                 model.train()
                 val_mean = v_sum / max(v_items, 1)
                 val_acc = v_correct / v_pix if v_pix else None
+                if v_bf[1] and v_bf[3]:
+                    v_p, v_r = v_bf[0] / v_bf[1], v_bf[2] / v_bf[3]
+                    val_bf = 2 * v_p * v_r / (v_p + v_r) if (v_p + v_r) else 0.0
+                else:
+                    val_bf = None
             # Checkpoint policy: best is judged once per epoch on the held-out
             # mean (epoch mean when no val split), never on a lucky single
             # batch - a per-step minimum once froze best.pt at epoch 162 of a
@@ -474,6 +514,7 @@ class Trainer:
                 "loss": criterion,
                 "val_mean": val_mean,
                 "val_acc": val_acc,
+                "val_bf": val_bf,
                 "params": self.params,
                 "n_classes": cfg.n_classes,
             }
@@ -491,6 +532,7 @@ class Trainer:
                     "epoch_mean": epoch_mean,
                     "val_mean": val_mean,
                     "val_acc": val_acc,
+                    "val_bf": val_bf,
                     "epoch_end": True,
                     "lr": optim.param_groups[0]["lr"],
                     "elapsed_s": time.perf_counter() - start,

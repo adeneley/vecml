@@ -1,0 +1,70 @@
+{
+  "comment": "ce-sweep: 5-arm label-loss-weight ablation at 100k/16ep, base 48, shard 0 only. Judged on boundary-F1 (val_bf, wired 21 Jul) + relay bench, NOT pixel accuracy. Arm w=0.00 keeps the DualHead attached so architecture is identical - it measures the pure head-tax and whether CE supervision helps the RGB head at all. Same protocol as hippo48-100k except epochs (16, matching the scaling-curve points).",
+  "runs": [
+    {
+      "name": "ce-w000",
+      "data_root": "/tmp/data/train-1m",
+      "n": 100000,
+      "val_n": 2000,
+      "n_classes": 16,
+      "label_loss_w": 0.0,
+      "base": 48,
+      "max_epochs": 16,
+      "target_loss": 0.003,
+      "cache_ram": false,
+      "num_workers": 16
+    },
+    {
+      "name": "ce-w005",
+      "data_root": "/tmp/data/train-1m",
+      "n": 100000,
+      "val_n": 2000,
+      "n_classes": 16,
+      "label_loss_w": 0.05,
+      "base": 48,
+      "max_epochs": 16,
+      "target_loss": 0.003,
+      "cache_ram": false,
+      "num_workers": 16
+    },
+    {
+      "name": "ce-w010",
+      "data_root": "/tmp/data/train-1m",
+      "n": 100000,
+      "val_n": 2000,
+      "n_classes": 16,
+      "label_loss_w": 0.1,
+      "base": 48,
+      "max_epochs": 16,
+      "target_loss": 0.003,
+      "cache_ram": false,
+      "num_workers": 16
+    },
+    {
+      "name": "ce-w020",
+      "data_root": "/tmp/data/train-1m",
+      "n": 100000,
+      "val_n": 2000,
+      "n_classes": 16,
+      "label_loss_w": 0.2,
+      "base": 48,
+      "max_epochs": 16,
+      "target_loss": 0.003,
+      "cache_ram": false,
+      "num_workers": 16
+    },
+    {
+      "name": "ce-w040",
+      "data_root": "/tmp/data/train-1m",
+      "n": 100000,
+      "val_n": 2000,
+      "n_classes": 16,
+      "label_loss_w": 0.4,
+      "base": 48,
+      "max_epochs": 16,
+      "target_loss": 0.003,
+      "cache_ram": false,
+      "num_workers": 16
+    }
+  ]
+}
