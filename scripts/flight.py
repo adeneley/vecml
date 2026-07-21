@@ -15,6 +15,7 @@ to its checkpoint (on a pod both live on the volume via the repo checkout).
 import argparse
 import json
 import math
+import subprocess
 import sys
 import threading
 import time
@@ -33,6 +34,8 @@ def main() -> int:
     ap.add_argument("--from-bench", default=None, help="bench.py --emit JSON; applied to every run")
     ap.add_argument("--host", default="0.0.0.0")
     ap.add_argument("--port", type=int, default=7300)
+    ap.add_argument("--single", type=int, default=None,
+                    help="internal: train only run #N (1-based) then exit")
     args = ap.parse_args()
 
     plan = json.loads(Path(args.plan).read_text())
@@ -41,7 +44,34 @@ def main() -> int:
         winner = json.loads(Path(args.from_bench).read_text())
         winner = winner.get("winner", winner)  # perflab.json nests it
 
+    # Sequencer mode: one fresh process per run. torch.compile's cudagraph
+    # trees live in thread-local storage; a second trainer thread in the same
+    # process hits the compiled cache and dies on the TLS assertion (the
+    # 21 Jul CE-sweep failure). A process per run also returns all GPU memory
+    # between arms.
+    if args.single is None:
+        for i, run in enumerate(plan["runs"], 1):
+            cmd = [sys.executable, str(Path(__file__).resolve()),
+                   "--plan", args.plan, "--host", args.host,
+                   "--port", str(args.port), "--single", str(i)]
+            if args.from_bench:
+                cmd += ["--from-bench", args.from_bench]
+            print(f"[flight] run {i}/{len(plan['runs'])}: "
+                  f"{run['name']} (fresh process)", flush=True)
+            rc = subprocess.run(cmd).returncode
+            if rc != 0:
+                print(f"[flight] WARNING: {run['name']} exited rc={rc}; "
+                      f"continuing with next run", flush=True)
+        # Idle rather than exit: an exiting job makes RunPod restart the
+        # container and replay the plan (see the skip guard). Teardown ends
+        # the pod.
+        print("[flight] all runs complete; idling for teardown", flush=True)
+        while True:
+            time.sleep(60)
+
     for i, run in enumerate(plan["runs"], 1):
+        if i != args.single:
+            continue
         run = dict(run)
         name = run.pop("name")
         run.setdefault("ckpt_dir", f"runs/{name}")
@@ -106,13 +136,9 @@ def main() -> int:
         time.sleep(10)  # let spectators drain the final events
         server.should_exit = True
         thread.join(timeout=30)
-        time.sleep(3)  # free the port before the next bind
+        time.sleep(3)  # free the port before the sequencer's next bind
 
-    # Idle rather than exit: an exiting job makes RunPod restart the container
-    # and replay the plan (see the skip guard above). Teardown ends the pod.
-    print("[flight] all runs complete; idling for teardown", flush=True)
-    while True:
-        time.sleep(60)
+    return 0
 
 
 if __name__ == "__main__":
