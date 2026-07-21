@@ -65,6 +65,16 @@ def vec_rust(png, svg):
                    capture_output=True, timeout=120)
 
 
+def vec_rust_labels(rgb_png, labels_png, svg, min_area):
+    """Label-input mode: hand the engine the class map directly instead of
+    letting it quantize. `rgb_png` supplies the colours the residue-mean fills
+    read; `labels_png` is a greyscale PNG whose pixel value is the class id."""
+    cmd = [RUST, str(rgb_png), "--labels", str(labels_png), "-o", str(svg)]
+    if min_area > 0:
+        cmd += ["--min-area", str(min_area)]
+    subprocess.run(cmd, check=True, capture_output=True, timeout=120)
+
+
 def vec_vtracer(png, svg):
     import vtracer
     vtracer.convert_image_to_svg_py(str(png), str(svg))
@@ -85,6 +95,10 @@ def main():
     ap.add_argument("--out", required=True)
     ap.add_argument("--engines", nargs="*", default=["rust", "vtracer"])
     ap.add_argument("--size", type=int, default=256)
+    # Despeckle threshold for the rust label-input variants. Model label maps
+    # still carry a little speckle; dissolving sub-threshold components keeps it
+    # from spawning spurious regions. 0 disables.
+    ap.add_argument("--min-area", type=int, default=8)
     args = ap.parse_args()
 
     out = Path(args.out)
@@ -113,6 +127,7 @@ def main():
             x = torch.from_numpy(wrecked).permute(2, 0, 1)[None]
             outp = model(x)
         flat = None
+        labels = None
         if has_labels:
             pred = outp["rgb"][0].permute(1, 2, 0).clamp(0, 1).numpy()
             labels = outp["logits"][0].argmax(0).numpy()
@@ -153,6 +168,31 @@ def main():
                     row[f"{eng}_{label}"] = de(rendered, clean)
                 except Exception as exc:  # noqa: BLE001 - one bad file must not kill the sweep
                     row[f"{eng}_{label}"] = {"error": f"{type(exc).__name__}: {exc}"[:200]}
+
+        # Label-input mode (the thesis under test): hand the rust engine the
+        # model's predicted class map directly instead of letting it quantize.
+        #   rust_labels     model labels    + model-cleaned RGB fills
+        #   rust_labels_gt  ground-truth    + clean-render RGB fills  (ceiling)
+        # The ceiling feeds perfect labels and perfect colours, isolating the
+        # engine's integration error from the model's label/colour error.
+        if "rust" in args.engines and labels is not None:
+            ids_png = img_dir / "label_ids.png"
+            Image.fromarray(labels.astype(np.uint8), mode="L").save(ids_png)
+            label_runs = [
+                ("rust_labels", img_dir / "cleaned.png", ids_png),
+                ("rust_labels_gt", d / "clean.png", d / "labels.png"),
+            ]
+            for tag, rgb_src, lbl_src in label_runs:
+                svg = img_dir / f"{tag}.svg"
+                try:
+                    vec_rust_labels(rgb_src, lbl_src, svg, args.min_area)
+                    rendered = render_svg(svg, args.size)
+                    Image.fromarray((rendered * 255).astype(np.uint8)).save(
+                        img_dir / f"{tag}.png")
+                    row[tag] = de(rendered, clean)
+                except Exception as exc:  # noqa: BLE001
+                    row[tag] = {"error": f"{type(exc).__name__}: {exc}"[:200]}
+
         rows.append(row)
         print(f"{d.name[:12]} damage={row['damage']['mean']:.2f} "
               f"cleanup={row['cleanup']['mean']:.2f}", flush=True)
@@ -168,6 +208,9 @@ def main():
         summary[f"{e}_raw"] = agg(f"{e}_raw")
         summary[f"{e}_relay"] = agg(f"{e}_relay")
         summary[f"{e}_flat"] = agg(f"{e}_flat")
+    if "rust" in args.engines:
+        summary["rust_labels"] = agg("rust_labels")
+        summary["rust_labels_gt"] = agg("rust_labels_gt")
     (out / "summary.json").write_text(json.dumps({"summary": summary, "rows": rows}, indent=2))
     print(json.dumps(summary, indent=2))
 
