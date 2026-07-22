@@ -150,3 +150,30 @@ touching the volume tarball) but get the same treatment: tear down promptly
 on completion, and give long jobs a completion watcher that harvests then
 terminates. Deliberate re-runs of a finished name: delete that run's
 events.jsonl (or rename the run).
+
+## 17. One process, five trainers: torch.compile's cudagraphs are thread-local ($6.20)
+The 21 Jul CE sweep ran five arms as successive threads in one flight.py
+process. Arm 1 compiled and trained; arms 2-5 hit the warm inductor cache
+from fresh threads and died in 20s on `torch._C._is_key_in_tls` (cudagraph
+tree managers live in thread-local storage). flight.py then idled "all runs
+complete" for ~6h because the Mac-side watcher polled runs-logs/ for events
+that actually live in checkpoints/ - blind watcher, idle pod, $6.20 gone.
+**Fixes (durable, 87365ae):** flight.py re-execs itself with --single N so
+every run gets a fresh process (own CUDA context, own TLS, GPU memory fully
+returned); watcher polls checkpoints/<run>/events.jsonl.
+
+## 18. Stale terminal-state markers shot down a healthy pod ($0.08)
+Relaunch watcher read the previous night's error-state events.jsonl off the
+volume during the new pod's boot, counted 5/5 terminal, and tore the pod
+down 5 minutes after deploy. Durable state is durable: failure markers from
+run N-1 look identical to failures from run N.
+**Fixes (durable):** delete stale events.jsonl before relaunch; watcher
+rm -f's its local temp before every S3 get (a failed get must read as "no
+data", not last poll's bytes); 15-min boot grace before any terminal-
+condition teardown. Structural fix for the whole class: pod-side TTL
+dead-man switch (ttl_watchdog.sh, prepended to every JOB_CMD by deploy.sh;
+default 2x estimate + 30 min). The Mac watcher is now a convenience, not
+the only thing standing between a hung pod and the credit balance. Note:
+passes RUNPOD_API_KEY into the pod env - acceptable on a private
+single-user account, revisit if the account is ever shared. UNTESTED on a
+live pod until the next deploy; verify the "[ttl] armed" line in console.log.

@@ -36,7 +36,7 @@ gpu_id() { case "$1" in
 CPU_VCPU_RATE=0.034   # UNVERIFIED, console-only. Assumed compute-optimized rate.
 
 # ---- defaults --------------------------------------------------------------
-MODE="gpu"; GPU="RTX5090"; VCPU=32; MINUTES=30; SPOT="false"; YES="false"
+MODE="gpu"; GPU="RTX5090"; VCPU=32; MINUTES=30; SPOT="false"; YES="false"; TTL_MINUTES=""
 IMAGE="${VECML_IMAGE:-}"                       # public GHCR image, e.g. ghcr.io/adeneley/vecml-gpu:latest (or -cpu)
 JOB_CMD=""; REPO_REF="${REPO_REF:-main}"
 CONTAINER_DISK_GB="${CONTAINER_DISK_GB:-50}"
@@ -57,6 +57,7 @@ while [ $# -gt 0 ]; do
     --cpu)     MODE="cpu"; shift;;
     --vcpu)    VCPU="$2"; shift 2;;
     --minutes) MINUTES="$2"; shift 2;;
+    --ttl)     TTL_MINUTES="$2"; shift 2;;
     --job)     JOB_CMD="$2"; shift 2;;
     --ref)     REPO_REF="$2"; shift 2;;
     --image)   IMAGE="$2"; shift 2;;
@@ -66,6 +67,15 @@ while [ $# -gt 0 ]; do
     *) echo "unknown flag: $1" >&2; usage 1;;
   esac
 done
+
+# Pod-side dead-man switch: --minutes is only a cost ESTIMATE; nothing
+# enforced it (21 Jul: a crashed sweep idled ~6h because the sole kill switch
+# was a watcher on the Mac). Default TTL = 2x estimate + 30 min boot buffer;
+# the pod terminates itself via the API when it expires. --ttl overrides.
+[ -z "${TTL_MINUTES}" ] && TTL_MINUTES=$(( MINUTES * 2 + 30 ))
+if [ -n "${JOB_CMD}" ] && [ -n "${RUNPOD_API_KEY:-}" ]; then
+  JOB_CMD="bash infra/runpod/ttl_watchdog.sh & ${JOB_CMD}"
+fi
 
 # ---- derive spec + cost ----------------------------------------------------
 IMAGE="${IMAGE:-$(default_image)}"
@@ -92,6 +102,7 @@ cat <<SUMMARY
   spec           : ${SPEC}
   pricing        : \$${RATE}/hr on-demand$( [ "${SPOT}" = true ] && echo "  ->  \$${EFF_RATE}/hr spot (est, 50% off)" )
   est. duration  : ${MINUTES} min  (${HOURS} hr)
+  self-destruct  : ${TTL_MINUTES} min TTL (pod-side dead-man switch)
   est. compute   : \$${EST_COST}   ( ${EFF_RATE} x ${HOURS} hr )
   container disk : ${CONTAINER_DISK_GB} GB (ephemeral, ~\$0.10/GB/mo, negligible per-run)
   network volume : ${RUNPOD_VOLUME_ID:-<UNSET RUNPOD_VOLUME_ID>}  (billed monthly, not per-run)
@@ -124,6 +135,8 @@ read -r -d '' BODY <<JSON || true
     "REPO_REF": "${REPO_REF}",
     "JOB_CMD": "${JOB_CMD}",
     "VOL_ROOT": "${VOL_ROOT}",
+    "TTL_MINUTES": "${TTL_MINUTES}",
+    "RUNPOD_API_KEY": "${RUNPOD_API_KEY:-}",
     "GIT_CONFIG_COUNT": "1",
     "GIT_CONFIG_KEY_0": "safe.directory",
     "GIT_CONFIG_VALUE_0": "*"
