@@ -1,0 +1,34 @@
+{
+  "comment": "e2e3: Tier-1 recipe arms vs the ce-w005 control (E1's winner, same 100k/16ep/base48/w005 protocol, shard 0 of train-1m). e2-dwce = boundary-weighted CE (GT-boundary band 1px-dilated, weighted 5:1) - label errors live on boundaries, plain CE underweights them. e3-ema = EMA 0.999 judged at val/checkpoint time + 1-epoch linear LR warmup - insurance arm against the 500k bf16 divergence; must cost nothing on val to be adopted. Judged on val_bf + relay bench vs ce-w005.",
+  "runs": [
+    {
+      "name": "e2-dwce",
+      "data_root": "/tmp/data/train-1m",
+      "n": 100000,
+      "val_n": 2000,
+      "n_classes": 16,
+      "label_loss_w": 0.05,
+      "boundary_w": 5.0,
+      "base": 48,
+      "max_epochs": 16,
+      "target_loss": 0.003,
+      "cache_ram": false,
+      "num_workers": 16
+    },
+    {
+      "name": "e3-ema",
+      "data_root": "/tmp/data/train-1m",
+      "n": 100000,
+      "val_n": 2000,
+      "n_classes": 16,
+      "label_loss_w": 0.05,
+      "ema_decay": 0.999,
+      "warmup_epochs": 1,
+      "base": 48,
+      "max_epochs": 16,
+      "target_loss": 0.003,
+      "cache_ram": false,
+      "num_workers": 16
+    }
+  ]
+}

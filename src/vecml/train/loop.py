@@ -116,6 +116,24 @@ def _labels_to_b64_png(idx_hw: torch.Tensor, size: int) -> str:
     return base64.b64encode(buf.getvalue()).decode("ascii")
 
 
+def _label_boundaries(lab: torch.Tensor) -> torch.Tensor:
+    """Bool (B,H,W): pixels adjacent to any label change (both sides)."""
+    b = torch.zeros_like(lab, dtype=torch.bool)
+    d = lab[:, 1:, :] != lab[:, :-1, :]
+    b[:, 1:, :] |= d
+    b[:, :-1, :] |= d
+    d = lab[:, :, 1:] != lab[:, :, :-1]
+    b[:, :, 1:] |= d
+    b[:, :, :-1] |= d
+    return b
+
+
+def _dilate3(b: torch.Tensor) -> torch.Tensor:
+    """One 3x3 binary dilation (B,H,W bool)."""
+    f = torch.nn.functional.max_pool2d(b.float().unsqueeze(1), 3, 1, 1)
+    return f.squeeze(1) > 0
+
+
 def _boundary_f1_parts(pred: torch.Tensor, gt: torch.Tensor):
     """Boundary-F1 components for int label maps (B,H,W), 1px tolerance.
 
@@ -125,20 +143,7 @@ def _boundary_f1_parts(pred: torch.Tensor, gt: torch.Tensor):
     true boundary, recall = true-boundary pixels within 1px of a predicted
     one. Returns raw sums so batches accumulate exactly.
     """
-    def bmask(lab):
-        b = torch.zeros_like(lab, dtype=torch.bool)
-        d = lab[:, 1:, :] != lab[:, :-1, :]
-        b[:, 1:, :] |= d
-        b[:, :-1, :] |= d
-        d = lab[:, :, 1:] != lab[:, :, :-1]
-        b[:, :, 1:] |= d
-        b[:, :, :-1] |= d
-        return b
-
-    def dilate(b):
-        f = torch.nn.functional.max_pool2d(b.float().unsqueeze(1), 3, 1, 1)
-        return f.squeeze(1) > 0
-
+    bmask, dilate = _label_boundaries, _dilate3
     pb, gb = bmask(pred), bmask(gt)
     return (
         int((pb & dilate(gb)).sum().item()), int(pb.sum().item()),
@@ -176,6 +181,18 @@ class TrainConfig:
     # comparable across modes.
     n_classes: int = 0
     label_loss_w: float = 0.25
+    # E2: boundary-weighted CE. When >1, cross-entropy switches to a per-pixel
+    # weighted mean where pixels within 1px of a GT label boundary count this
+    # many times. Motivation: label errors concentrate ON boundaries (the
+    # val_bf story) while plain CE weights the ~95% interior pixels equally.
+    boundary_w: float = 1.0
+    # E3 stabilizers. ema_decay > 0 keeps an exponential moving average of the
+    # weights (0.999 typical); val + checkpoints then use the EMA weights, so
+    # best.pt ships what we'd deploy. warmup_epochs prepends a linear LR ramp
+    # (start 0.1x) before the cosine decay - the 500k divergence started in
+    # epoch 1 at full LR under bf16.
+    ema_decay: float = 0.0
+    warmup_epochs: int = 0
     # UNet width: channel count of the first encoder stage (32 -> ~1.9M params,
     # 48 -> ~4.2M, 64 -> ~7.5M). Params scale ~quadratically with base.
     base: int = 32
@@ -319,11 +336,39 @@ class Trainer:
         )
         # Cosine decay from lr down to ~lr/20 over the whole run, stepped once
         # per epoch. Fixes the constant-LR bounce observed near the loss floor.
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-            optim, T_max=max(cfg.max_epochs, 1), eta_min=cfg.lr / 20.0
+        # warmup_epochs (E3) prepends a linear 0.1x -> 1x ramp.
+        cosine = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optim, T_max=max(cfg.max_epochs - cfg.warmup_epochs, 1),
+            eta_min=cfg.lr / 20.0,
         )
+        if cfg.warmup_epochs > 0:
+            scheduler = torch.optim.lr_scheduler.SequentialLR(
+                optim,
+                [torch.optim.lr_scheduler.LinearLR(
+                    optim, start_factor=0.1, total_iters=cfg.warmup_epochs),
+                 cosine],
+                milestones=[cfg.warmup_epochs],
+            )
+        else:
+            scheduler = cosine
         loss_fn = nn.L1Loss()
-        ce_fn = nn.CrossEntropyLoss() if cfg.n_classes else None
+        # reduction="none" in boundary mode: the weighted mean is taken by
+        # hand in the step so boundary pixels can count boundary_w times.
+        ce_fn = None
+        if cfg.n_classes:
+            ce_fn = nn.CrossEntropyLoss(
+                reduction="none" if cfg.boundary_w > 1.0 else "mean")
+
+        # E3: EMA shadow of every state tensor. Pairs are hoisted once -
+        # state_dict() tensor refs stay valid because the optimizer and the
+        # val-time load_state_dict both mutate in place.
+        ema_sd = None
+        ema_pairs = None
+        if cfg.ema_decay > 0.0:
+            ema_sd = {k: v.detach().clone()
+                      for k, v in model.state_dict().items()}
+            ema_pairs = [(ema_sd[k], v)
+                         for k, v in model.state_dict().items()]
 
         # Live sample views, drawn from the held-out split when one exists
         # (so the 4-up shows images the model never trains on). Item 0 is
@@ -402,7 +447,18 @@ class Trainer:
                     out = net(x)
                     if ce_fn is not None:
                         l1 = loss_fn(out["rgb"], y)
-                        ce = ce_fn(out["logits"], lab)
+                        if cfg.boundary_w > 1.0:
+                            # E2: GT-boundary band (1px dilated) weighted
+                            # boundary_w:1 against the interior. loss_ce on
+                            # the chart is this weighted mean - comparable
+                            # within an arm, not across boundary_w values.
+                            ce_map = ce_fn(out["logits"], lab)
+                            w = torch.where(
+                                _dilate3(_label_boundaries(lab)),
+                                cfg.boundary_w, 1.0)
+                            ce = (ce_map * w).sum() / w.sum()
+                        else:
+                            ce = ce_fn(out["logits"], lab)
                         loss = l1 + cfg.label_loss_w * ce
                     else:
                         l1 = loss = loss_fn(out, y)
@@ -415,6 +471,13 @@ class Trainer:
                 # that step; at 1.0 it is inert on healthy gradients.
                 torch.nn.utils.clip_grad_norm_(net.parameters(), 1.0)
                 optim.step()
+                if ema_pairs is not None:
+                    with torch.no_grad():
+                        for e, v in ema_pairs:
+                            if torch.is_floating_point(e):
+                                e.lerp_(v, 1.0 - cfg.ema_decay)
+                            else:
+                                e.copy_(v)
 
                 global_step += 1
                 bs = x.shape[0]
@@ -469,6 +532,15 @@ class Trainer:
 
             flush_pending()  # drain the tail window into the epoch sums
             epoch_mean = epoch_loss_sum / max(epoch_items, 1)
+            # E3: val + checkpoints judge the EMA weights (what we'd ship);
+            # raw weights are restored after saving so training continues
+            # unperturbed. In-place load_state_dict keeps tensor storages
+            # stable for the compiled train step and the hoisted ema_pairs.
+            raw_sd = None
+            if ema_sd is not None:
+                raw_sd = {k: v.detach().clone()
+                          for k, v in model.state_dict().items()}
+                model.load_state_dict(ema_sd)
             val_mean = None
             val_acc = None
             val_bf = None
@@ -517,11 +589,15 @@ class Trainer:
                 "val_bf": val_bf,
                 "params": self.params,
                 "n_classes": cfg.n_classes,
+                "boundary_w": cfg.boundary_w,
+                "ema_decay": cfg.ema_decay,
             }
             torch.save(payload, ckpt_dir / "last.pt")
             if criterion < self.best_loss:
                 self.best_loss = criterion
                 torch.save(payload, ckpt_dir / "best.pt")
+            if raw_sd is not None:
+                model.load_state_dict(raw_sd)
             # Final per-epoch mean point (the exit-criterion line on the chart).
             self._emit(
                 {
