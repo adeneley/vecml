@@ -1,0 +1,52 @@
+{
+  "comment": "night-extras (24 Jul, Aden's $5 discretionary, outside the E-tree): three arms sharing e4-v1 as control (identical 100k shard-0 v1 data + standard recipe w005/boundary5/warmup1). x1-seed-twin = exact e4-v1 re-run at seed 1: measures the run-to-run noise floor that prices every past and future verdict. x2-ema-on-recipe = standard recipe + EMA 0.999: does the e3 flatten blow-up (ac46dc65 7.54) reproduce when EMA rides the adopted recipe alone? x3-width64 = base 64 (~7.5M params): early scaling-surface point - does width matter at 100k, informing E8's spend shape before the mint.",
+  "runs": [
+    {
+      "name": "x1-seed-twin",
+      "data_root": "/tmp/data/train-1m",
+      "n": 100000,
+      "val_n": 2000,
+      "n_classes": 16,
+      "label_loss_w": 0.05,
+      "boundary_w": 5.0,
+      "warmup_epochs": 1,
+      "seed": 1,
+      "base": 48,
+      "max_epochs": 16,
+      "target_loss": 0.003,
+      "cache_ram": false,
+      "num_workers": 16
+    },
+    {
+      "name": "x2-ema-on-recipe",
+      "data_root": "/tmp/data/train-1m",
+      "n": 100000,
+      "val_n": 2000,
+      "n_classes": 16,
+      "label_loss_w": 0.05,
+      "boundary_w": 5.0,
+      "warmup_epochs": 1,
+      "ema_decay": 0.999,
+      "base": 48,
+      "max_epochs": 16,
+      "target_loss": 0.003,
+      "cache_ram": false,
+      "num_workers": 16
+    },
+    {
+      "name": "x3-width64",
+      "data_root": "/tmp/data/train-1m",
+      "n": 100000,
+      "val_n": 2000,
+      "n_classes": 16,
+      "label_loss_w": 0.05,
+      "boundary_w": 5.0,
+      "warmup_epochs": 1,
+      "base": 64,
+      "max_epochs": 16,
+      "target_loss": 0.003,
+      "cache_ram": false,
+      "num_workers": 16
+    }
+  ]
+}
