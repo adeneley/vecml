@@ -193,6 +193,11 @@ class TrainConfig:
     # epoch 1 at full LR under bf16.
     ema_decay: float = 0.0
     warmup_epochs: int = 0
+    # E4/E8: "" = pre-baked wrecked_XX.png pairs (PairsDataset, v0 behaviour);
+    # "v2-otf" = on-the-fly wreck-v2 damage synthesized per item per epoch
+    # from clean.png (WreckOnTheFly). The val slice gets its own frozen
+    # instance so val_mean stays comparable across epochs.
+    wreck: str = ""
     # UNet width: channel count of the first encoder stage (32 -> ~1.9M params,
     # 48 -> ~4.2M, 64 -> ~7.5M). Params scale ~quadratically with base.
     base: int = 32
@@ -275,20 +280,45 @@ class Trainer:
             }
         )
 
-        dataset = PairsDataset(
-            cfg.data_root,
-            n=cfg.n,
-            size=cfg.size,
-            variant=cfg.variant,
-            n_classes=cfg.n_classes or None,
-            cache_ram=cfg.cache_ram,
-        )
+        otf = cfg.wreck == "v2-otf"
+        if otf:
+            from vecml.data.wreck_otf import WreckOnTheFly
+
+            dataset = WreckOnTheFly(
+                cfg.data_root,
+                n=cfg.n,
+                size=cfg.size,
+                n_classes=cfg.n_classes or None,
+                cache_ram=cfg.cache_ram,
+                seed=cfg.seed,
+            )
+            # Frozen twin over the same dirs: the val slice always sees
+            # epoch-0 damage, so val_mean is comparable across epochs.
+            val_source = WreckOnTheFly(
+                cfg.data_root,
+                n=cfg.n,
+                size=cfg.size,
+                n_classes=cfg.n_classes or None,
+                cache_ram=cfg.cache_ram,
+                seed=cfg.seed,
+                freeze=True,
+            )
+        else:
+            dataset = PairsDataset(
+                cfg.data_root,
+                n=cfg.n,
+                size=cfg.size,
+                variant=cfg.variant,
+                n_classes=cfg.n_classes or None,
+                cache_ram=cfg.cache_ram,
+            )
+            val_source = dataset
         val_n = min(cfg.val_n, max(len(dataset) - 1, 0))
         if val_n > 0:
             from torch.utils.data import Subset
 
             train_set = Subset(dataset, range(len(dataset) - val_n))
-            val_set = Subset(dataset, range(len(dataset) - val_n, len(dataset)))
+            val_set = Subset(val_source, range(len(dataset) - val_n, len(dataset)))
             val_loader = DataLoader(val_set, batch_size=32, shuffle=False)
         else:
             train_set, val_set, val_loader = dataset, None, None
@@ -298,7 +328,9 @@ class Trainer:
             shuffle=True,
             num_workers=cfg.num_workers,
             pin_memory=cfg.pin_memory and self.device == "cuda",
-            persistent_workers=cfg.num_workers > 0,
+            # OTF workers must re-fork each epoch to pick up set_epoch;
+            # persistent workers would keep epoch-0 damage forever.
+            persistent_workers=cfg.num_workers > 0 and not otf,
             drop_last=False,
         )
         use_amp = cfg.amp and self.device == "cuda"
@@ -426,6 +458,8 @@ class Trainer:
             pend_l1, pend_ce, pend_items, pend_steps = None, None, 0, 0
 
         for epoch in range(cfg.max_epochs):
+            if otf:
+                dataset.set_epoch(epoch)  # fresh damage; workers fork after this
             epoch_loss_sum = 0.0
             epoch_items = 0
             model.train()
