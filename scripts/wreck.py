@@ -31,6 +31,13 @@ def main():
         help="degradation tier",
     )
     ap.add_argument("--seed", type=int, default=0, help="base seed")
+    ap.add_argument(
+        "--wrecker",
+        default="v1",
+        choices=["v1", "v2"],
+        help="degradation engine: v1 (frozen independent ops) or v2 "
+        "(correlated capture-path families). Default stays v1 until the A/B clears.",
+    )
     ap.add_argument("--bg", default="white", choices=["white", "random"],
                     help="background mode: random = per-pair solid colours")
     ap.add_argument("--curriculum", action="store_true",
@@ -49,7 +56,7 @@ def main():
         ap.error(f"no *.svg files in {in_dir}")
 
     print(f"backend: {backend_name()}  |  {len(svgs)} svg(s)  |  size {args.size}px  "
-          f"|  {args.variants} variant(s)  |  {args.difficulty}")
+          f"|  {args.variants} variant(s)  |  {args.difficulty}  |  wrecker {args.wrecker}")
 
     jobs = [
         (
@@ -63,6 +70,7 @@ def main():
             args.difficulty,
             args.bg,
             args.curriculum,
+            args.wrecker,
         )
         for svg in svgs
     ]
@@ -96,11 +104,11 @@ def main():
 
 
 def _one(job):
-    svg, out_dir, size, variants, seed, difficulty, bg, curriculum = job
+    svg, out_dir, size, variants, seed, difficulty, bg, curriculum, wrecker = job
     try:
         return wreck_svg(
             svg, out_dir, size=size, n_variants=variants, seed=seed,
-            difficulty=difficulty, bg_mode=bg, curriculum=curriculum,
+            difficulty=difficulty, bg_mode=bg, curriculum=curriculum, wreck=wrecker,
         )
     except Exception:  # one bad svg must not kill a 10k-file sweep
         return None

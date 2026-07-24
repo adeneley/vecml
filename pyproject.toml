@@ -17,7 +17,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest", "ruff"]
+dev = [
+    "pytest",
+    "ruff",
+    "scikit-image>=0.26.0",
+]
 baselines = ["vtracer"]
 
 # Torch lives behind mutually-exclusive dependency GROUPS so the CPU job image

@@ -25,6 +25,13 @@ from .idmap import DerivationError, derive_labels_from_svg
 from .labels import derive_labels_from_pixels
 from .renderer import backend_name, composite_rgba, render_svg_rgba
 from .wreck import apply_recipe, sample_recipe
+from .wreck_v2 import (
+    apply_recipe_v2,
+    is_identity,
+    sample_recipe_v2,
+    variant_rngs,
+    warp_label_map,
+)
 
 
 def _sample_bg(rng, palette) -> tuple[int, int, int]:
@@ -58,6 +65,33 @@ def _derive_ground_truth(svg_path, clean, size):
         return label_map, palette, None, "pixels_fallback", []
 
 
+def _wreck_variant_v2(clean, label_map, variant_seed, name, size, family_mix, out_dir):
+    """Sample, apply, and write one v2 variant. Geometric families warp the
+    label map by the same homography and get a per-variant labels_XX.png; all
+    others share the base labels.png. Returns the variant meta record."""
+    sample_rng, apply_rng = variant_rngs(variant_seed)
+    recipe = sample_recipe_v2(sample_rng, size=size, mix=family_mix)
+    wrecked, M = apply_recipe_v2(clean, recipe, apply_rng)
+
+    label_file = "labels.png"
+    if not is_identity(M):
+        warped = warp_label_map(label_map, M)
+        label_file = name.replace("wrecked_", "labels_")
+        mode = "L" if warped.dtype == np.uint8 else "I;16"
+        Image.fromarray(warped, mode=mode).save(out_dir / label_file)
+
+    Image.fromarray(wrecked, mode="RGB").save(out_dir / name)
+    return {
+        "file": name,
+        "seed": int(variant_seed),
+        "recipe_version": "wreck-v2",
+        "family": recipe["family"],
+        "global_severity": recipe["global_severity"],
+        "label_file": label_file,
+        "ops": recipe["ops"],
+    }
+
+
 def wreck_svg(
     svg_path,
     out_dir,
@@ -67,6 +101,8 @@ def wreck_svg(
     difficulty: str = "medium",
     bg_mode: str = "white",
     curriculum: bool = False,
+    wreck: str = "v1",
+    family_mix=None,
 ):
     """Render, label, and wreck one SVG into a directory of training pairs.
 
@@ -80,9 +116,18 @@ def wreck_svg(
 
     curriculum: a slice of variants get zero damage (identity pairs) or
     severity scaled way down, teaching the model to leave clean input alone.
+    (v1 only; v2 folds identity into its severity mixture at s=0.)
+
+    wreck: "v1" (frozen, the seven independent photometric ops) or "v2" (the
+    correlated capture-path families in wreck_v2). v2 stamps each sample with
+    its family, global severity, and full resolved op params, and writes a
+    per-variant warped labels_XX.png for geometric families (matched-warp label
+    invariant). family_mix optionally overrides wreck_v2.DEFAULT_MIX.
 
     Returns a small summary dict (counts and paths) for the caller to log.
     """
+    if wreck not in ("v1", "v2"):
+        raise ValueError(f"unknown wreck version {wreck!r}, expected 'v1' or 'v2'")
     svg_path = Path(svg_path)
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -125,6 +170,16 @@ def wreck_svg(
         # Derive a distinct, reproducible sub-seed per variant from the base
         # seed so the whole run is deterministic yet variants differ.
         variant_seed = seed * 100003 + i
+        name = f"wrecked_{i:02d}.png"
+
+        if wreck == "v2":
+            variants.append(
+                _wreck_variant_v2(
+                    clean, label_map, variant_seed, name, size, family_mix, out_dir
+                )
+            )
+            continue
+
         rng = np.random.default_rng(variant_seed)
         recipe = sample_recipe(rng, difficulty)
         if curriculum:
@@ -135,7 +190,6 @@ def wreck_svg(
                 recipe = [(op, sev * 0.3) for op, sev in recipe]  # barely damaged
         wrecked = apply_recipe(clean, recipe, rng)
 
-        name = f"wrecked_{i:02d}.png"
         Image.fromarray(wrecked, mode="RGB").save(out_dir / name)
         variants.append(
             {
@@ -147,6 +201,7 @@ def wreck_svg(
 
     meta = {
         "source_svg": str(svg_path),
+        "wreck": wreck,
         "size": size,
         "difficulty": difficulty,
         "bg_mode": bg_mode,
