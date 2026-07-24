@@ -20,6 +20,19 @@ from pathlib import Path
 DEFAULT_CLEAN = "datasets/svg-stack-labelled/clean"
 
 
+def off_split_shas(manifest: Path, split: str) -> set:
+    """Shas whose manifest split label is NOT `split` (the smaller side:
+    train is 95% of the corpus, so we hold the ~114k val/test shas)."""
+    out = set()
+    tag = f'"split": "{split}"'
+    with open(manifest) as fh:
+        for ln in fh:
+            if tag not in ln:
+                i = ln.find('"sha": "') + 8
+                out.add(ln[i:ln.find('"', i)])
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--n", type=int, required=True)
@@ -42,10 +55,26 @@ def main():
                          "disjoint slices need no coordination. Union of "
                          "shards 0..j-1 of k = a uniform n*j/k sample, which "
                          "is how one 1M build also yields the 500k set.")
+    ap.add_argument("--split", default="train",
+                    help="manifest split label to sample from (default "
+                         "'train'; 'any' disables the filter). The 21 Jul "
+                         "leakage audit found ~5%% of samples were val/test "
+                         "shas because this filter didn't exist.")
+    ap.add_argument("--manifest", default=None,
+                    help="manifest.jsonl path (default: sibling of --clean)")
     ap.add_argument("--seed", type=int, default=1000)
     args = ap.parse_args()
 
     used = set()
+    if args.split != "any":
+        manifest = Path(args.manifest) if args.manifest \
+            else Path(args.clean).parent / "manifest.jsonl"
+        if not manifest.exists():
+            raise SystemExit(f"manifest not found: {manifest} "
+                             "(pass --manifest or --split any)")
+        off = off_split_shas(manifest, args.split)
+        used |= off
+        print(f"split filter '{args.split}': excluding {len(off)} off-split shas")
     for ex in args.exclude:
         used |= {p.stem for p in Path(ex).glob("*.svg")}
     shas_file = Path(args.exclude_shas) if args.exclude_shas else None
